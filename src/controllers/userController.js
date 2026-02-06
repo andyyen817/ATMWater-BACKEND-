@@ -1,0 +1,241 @@
+const User = require('../models/User');
+const Transaction = require('../models/Transaction');
+const RenrenCard = require('../models/RenrenCard');
+const renrenWaterService = require('../services/renrenWaterService');
+
+/**
+ * @desc    获取用户的卡片列表（含余额）
+ * @route   GET /api/user/cards
+ */
+exports.getUserCards = async (req, res) => {
+    try {
+        // 查找与当前用户关联的所有卡片
+        const cards = await RenrenCard.find({ localUserId: req.user.id });
+
+        // 实时从人人水站同步卡片余额
+        const cardsWithBalance = await Promise.all(cards.map(async (card) => {
+            try {
+                const cardInfo = await renrenWaterService.getCardInfo(card.cardNo);
+
+                // 打印完整的API返回数据用于调试
+                console.log(`[UserCards] API response for card ${card.cardNo}:`, JSON.stringify(cardInfo, null, 2));
+
+                if (cardInfo.success && cardInfo.code === 0) {
+                    card.balance = cardInfo.result.balance;
+                    card.realBalance = cardInfo.result.real_balance;
+                    card.presentCash = cardInfo.result.present_cash || 0;
+                    // 尝试多种可能的字段名
+                    card.unsyncCash = cardInfo.result.unsync_cash || cardInfo.result.unsyncCash || cardInfo.result.pending_cash || 0;
+                    card.valid = cardInfo.result.valid;
+                    card.userName = cardInfo.result.user_name || card.userName;
+                    card.userPhone = cardInfo.result.user_phone || card.userPhone;
+                    card.lastSyncTime = new Date();
+                    await card.save();
+
+                    console.log(`[UserCards] Card ${card.cardNo} updated - unsyncCash:`, card.unsyncCash);
+                }
+            } catch (error) {
+                console.error(`[UserCards] Failed to sync card ${card.cardNo}:`, error.message);
+            }
+
+            return {
+                cardNo: card.cardNo,
+                balance: card.balance,
+                realBalance: card.realBalance,
+                presentCash: card.presentCash,
+                unsyncCash: card.unsyncCash || 0,
+                valid: card.valid,
+                isBlack: card.isBlack,
+                userName: card.userName,
+                userPhone: card.userPhone,
+                lastSyncTime: card.lastSyncTime,
+                boundEcardNo: card.boundEcardNo || '' // 绑定的实物水卡号
+            };
+        }));
+
+        res.status(200).json({ success: true, data: cardsWithBalance });
+    } catch (error) {
+        console.error('[UserCards] Error:', error.message);
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    获取用户卡片的交易记录
+ * @route   GET /api/user/cards/:cardNo/transactions
+ */
+exports.getCardTransactions = async (req, res) => {
+    try {
+        const { cardNo } = req.params;
+        const { page = 1, size = 20 } = req.query;
+
+        // 验证卡片是否属于当前用户
+        const card = await RenrenCard.findOne({ cardNo, localUserId: req.user.id });
+
+        if (!card) {
+            return res.status(404).json({ success: false, message: 'Card not found' });
+        }
+
+        // 从人人水站获取交易记录
+        const records = await renrenWaterService.getCardRecords(cardNo, parseInt(page), parseInt(size));
+
+        if (records.success && records.code === 0) {
+            const transactions = records.result.list || [];
+
+            res.status(200).json({
+                success: true,
+                data: transactions.map(t => ({
+                    date: t.createTime ? new Date(t.createTime) : new Date(),
+                    cash: t.cash || 0,
+                    presentCash: t.present_cash || 0,
+                    days: t.days || 0,
+                    tradePayType: t.tradePayType,
+                    remark: t.remark || ''
+                })),
+                total: records.result.total || 0,
+                page: parseInt(page)
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                message: 'Failed to fetch transactions from Renren Water API',
+                data: []
+            });
+        }
+    } catch (error) {
+        console.error('[CardTransactions] Error:', error.message);
+        res.status(500).json({ success: false, message: 'Server Error', data: [] });
+    }
+};
+
+/**
+ * @desc    获取用户取水历史
+ * @route   GET /api/user/history
+ */
+exports.getUserHistory = async (req, res) => {
+    try {
+        const history = await Transaction.find({ 
+            userId: req.user.id,
+            type: { $in: ['Water-Purchase', 'Dispense'] } 
+        }).sort({ createdAt: -1 });
+
+        const formattedHistory = history.map(item => ({
+            id: item._id,
+            date: item.createdAt,
+            unitName: item.metadata?.unitName || 'Water Station',
+            volume: item.metadata?.volume || 0,
+            waterType: item.metadata?.waterType || 'Pure',
+            amount: Math.abs(item.amount)
+        }));
+
+        res.status(200).json({ success: true, data: formattedHistory });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    获取完整的个人资料 (包含地址和银行卡)
+ * @route   GET /api/user/profile
+ */
+exports.getProfile = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select('-otp -otpExpires +password');
+        res.status(200).json({ success: true, data: user });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    更新用户资料
+ * @route   PUT /api/user/profile
+ */
+exports.updateProfile = async (req, res) => {
+    try {
+        const { name, email } = req.body;
+        const user = await User.findByIdAndUpdate(
+            req.user.id,
+            { name, email },
+            { new: true, runValidators: true }
+        ).select('-otp -otpExpires');
+
+        res.status(200).json({
+            success: true,
+            data: user
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    添加银行卡
+ * @route   POST /api/user/bank-accounts
+ */
+exports.addBankAccount = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        const { bankName, accountNumber, accountHolder } = req.body;
+
+        // 如果是第一张卡，设为默认
+        const isDefault = user.bankAccounts.length === 0;
+        
+        user.bankAccounts.push({ bankName, accountNumber, accountHolder, isDefault });
+        await user.save();
+
+        res.status(201).json({ success: true, data: user.bankAccounts });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    添加收货地址
+ * @route   POST /api/user/addresses
+ */
+exports.addAddress = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        const { label, receiverName, receiverPhone, fullAddress } = req.body;
+
+        const isDefault = user.shippingAddresses.length === 0;
+        
+        user.shippingAddresses.push({ label, receiverName, receiverPhone, fullAddress, isDefault });
+        await user.save();
+
+        res.status(201).json({ success: true, data: user.shippingAddresses });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    删除银行卡
+ * @route   DELETE /api/user/bank-accounts/:id
+ */
+exports.deleteBankAccount = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        user.bankAccounts = user.bankAccounts.filter(acc => acc._id.toString() !== req.params.id);
+        await user.save();
+        res.status(200).json({ success: true, data: user.bankAccounts });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    删除地址
+ * @route   DELETE /api/user/addresses/:id
+ */
+exports.deleteAddress = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        user.shippingAddresses = user.shippingAddresses.filter(addr => addr._id.toString() !== req.params.id);
+        await user.save();
+        res.status(200).json({ success: true, data: user.shippingAddresses });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};

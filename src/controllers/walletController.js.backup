@@ -1,0 +1,125 @@
+const Transaction = require('../models/Transaction');  
+const User = require('../models/User');  
+
+/**
+ * @desc    发起充值申请 (临时绕过 Xendit，直接到账用于调试)
+ * @route   POST /api/wallet/topup
+ */
+exports.createTopUp = async (req, res) => {
+    try {
+        const { amount } = req.body;
+        const userId = req.user.id; 
+
+        // 1. 验证起充金额 (保持逻辑，但允许更小金额测试)
+        const MIN_AMOUNT = 1000; // 调试阶段允许小额
+        if (amount < MIN_AMOUNT) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `Minimum top up amount for debugging is Rp ${new Intl.NumberFormat('id-ID').format(MIN_AMOUNT)}` 
+            });
+        }
+
+        // 2. 直接更新用户余额 (绕过 Xendit)
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        user.balance += amount;
+
+        // 处理首次充值推荐逻辑 (可选，为了保持逻辑完整性)
+        if (!user.isFirstTopUpDone && amount >= 300000) {
+            user.isFirstTopUpDone = true;
+            if (user.managedBy) {
+                const REWARD_AMOUNT = 40000;
+                user.balance += REWARD_AMOUNT;
+                await Transaction.create({
+                    userId: user._id,
+                    amount: REWARD_AMOUNT,
+                    type: 'ReferralReward',
+                    status: 'Completed',
+                    description: 'Welcome Bonus (Simulated)'
+                });
+
+                const referrer = await User.findById(user.managedBy);
+                if (referrer) {
+                    referrer.balance += REWARD_AMOUNT;
+                    await referrer.save();
+                    await Transaction.create({
+                        userId: referrer._id,
+                        amount: REWARD_AMOUNT,
+                        type: 'ReferralReward',
+                        status: 'Completed',
+                        description: `Referral Bonus for inviting ${user.phoneNumber}`
+                    });
+                }
+            }
+        }
+
+        await user.save();
+
+        // 3. 创建已完成的交易记录
+        const externalId = `DEBUG_TOPUP_${Date.now()}_${userId.toString().slice(-4)}`;
+        await Transaction.create({
+            userId,
+            type: 'TopUp',
+            amount,
+            externalId,
+            status: 'Completed',
+            description: `AirKOP Wallet Top Up (DEBUG MODE) - Rp ${amount}`
+        });
+
+        res.status(200).json({
+            success: true,
+            message: 'Debug Top-up successful! Balance updated.',
+            balance: user.balance,
+            externalId: externalId
+        });
+
+    } catch (error) {
+        console.error('Debug Top-up Error:', error);
+        res.status(500).json({ success: false, message: 'Failed to process debug top-up' });
+    }
+};
+
+/**
+ * @desc    接收 Xendit 支付回调 (Webhook) [P1-API-003]
+ */
+exports.handleWebhook = async (req, res) => {
+    try {
+        const { external_id, amount, status } = req.body;
+        console.log(`[Xendit Webhook] Received status ${status} for ${external_id}`);
+
+        if (status === 'PAID' || status === 'SETTLED') {
+            // 查找对应的 Pending 交易记录 (如果是正式流程产生的)
+            let transaction = await Transaction.findOne({ externalId: external_id });
+            
+            if (transaction && transaction.status === 'Pending') {
+                const user = await User.findById(transaction.userId);
+                if (user) {
+                    user.balance += amount;
+                    
+                    // 处理首次充值逻辑
+                    if (!user.isFirstTopUpDone && amount >= 300000) {
+                        user.isFirstTopUpDone = true;
+                        // ... (此处可复用 createTopUp 中的推荐奖励逻辑)
+                    }
+
+                    await user.save();
+                    transaction.status = 'Completed';
+                    await transaction.save();
+                    
+                    console.log(`[Xendit Success] User ${user.phoneNumber} account topped up.`);
+                }
+            } else if (!transaction) {
+                // 如果是直接转账或其他情况，可能需要手动处理或记录日志
+                console.warn(`[Xendit Warning] Received payment for unknown transaction: ${external_id}`);
+            }
+        }
+        res.status(200).json({ success: true });
+    } catch (error) {
+        console.error('Xendit Webhook Error:', error);
+        res.status(500).json({ success: false });
+    }
+};
+

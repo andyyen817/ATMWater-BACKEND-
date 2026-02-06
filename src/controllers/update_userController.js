@@ -1,0 +1,134 @@
+const User = require('../models/User');
+const Transaction = require('../models/Transaction');
+
+/**
+ * @desc    获取用户取水历史
+ * @route   GET /api/user/history
+ */
+exports.getUserHistory = async (req, res) => {
+    try {
+        const history = await Transaction.find({ 
+            userId: req.user.id,
+            type: { $in: ['Water-Purchase', 'Dispense'] } 
+        }).sort({ createdAt: -1 });
+
+        const formattedHistory = history.map(item => ({
+            id: item._id,
+            date: item.createdAt,
+            unitName: item.metadata?.unitName || 'Water Station',
+            volume: item.metadata?.volume || 0,
+            waterType: item.metadata?.waterType || 'Pure',
+            amount: Math.abs(item.amount)
+        }));
+
+        res.status(200).json({ success: true, data: formattedHistory });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    获取完整的个人资料 (包含地址和银行卡)
+ * @route   GET /api/user/profile
+ */
+exports.getProfile = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select('-otp -otpExpires +password');
+        res.status(200).json({ success: true, data: user });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    更新用户资料
+ * @route   PUT /api/user/profile
+ */
+exports.updateProfile = async (req, res) => {
+    try {
+        const { name, email } = req.body;
+        const user = await User.findByIdAndUpdate(
+            req.user.id,
+            { name, email },
+            { new: true, runValidators: true }
+        ).select('-otp -otpExpires');
+
+        res.status(200).json({
+            success: true,
+            data: user
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    添加银行卡
+ * @route   POST /api/user/bank-accounts
+ */
+exports.addBankAccount = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        const { bankName, accountNumber, accountHolder } = req.body;
+
+        // 如果是第一张卡，设为默认
+        const isDefault = user.bankAccounts.length === 0;
+        
+        user.bankAccounts.push({ bankName, accountNumber, accountHolder, isDefault });
+        await user.save();
+
+        res.status(201).json({ success: true, data: user.bankAccounts });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    添加收货地址
+ * @route   POST /api/user/addresses
+ */
+exports.addAddress = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        const { label, receiverName, receiverPhone, fullAddress } = req.body;
+
+        const isDefault = user.shippingAddresses.length === 0;
+        
+        user.shippingAddresses.push({ label, receiverName, receiverPhone, fullAddress, isDefault });
+        await user.save();
+
+        res.status(201).json({ success: true, data: user.shippingAddresses });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    删除银行卡
+ * @route   DELETE /api/user/bank-accounts/:id
+ */
+exports.deleteBankAccount = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        user.bankAccounts = user.bankAccounts.filter(acc => acc._id.toString() !== req.params.id);
+        await user.save();
+        res.status(200).json({ success: true, data: user.bankAccounts });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    删除地址
+ * @route   DELETE /api/user/addresses/:id
+ */
+exports.deleteAddress = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        user.shippingAddresses = user.shippingAddresses.filter(addr => addr._id.toString() !== req.params.id);
+        await user.save();
+        res.status(200).json({ success: true, data: user.shippingAddresses });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};

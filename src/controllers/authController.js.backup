@@ -1,0 +1,124 @@
+const User = require('../models/User');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+
+// 生成 6 位大写推荐码
+const generateReferralCode = () => {
+    return crypto.randomBytes(3).toString('hex').toUpperCase();
+};
+
+// 模拟发送 WhatsApp OTP
+const sendWhatsAppOTP = async (phoneNumber, otp) => {
+    console.log(`\n==================================================`);
+    console.log(`[WhatsApp Mock] To: ${phoneNumber}`);
+    console.log(`[WhatsApp Mock] Message: Your ATMWater OTP is: ${otp}`);
+    console.log(`==================================================\n`);
+    return true;
+};
+
+// @desc    请求发送 OTP
+exports.requestOTP = async (req, res) => {
+    console.log('--- OTP REQUEST RECEIVED ---', req.body);
+    try {
+        const { phoneNumber, referrerCode } = req.body; // 注册时可选传入推荐码
+
+        if (!phoneNumber) {
+            return res.status(400).json({ message: 'Phone number is required' });
+        }
+
+        const otp = Math.floor(1000 + Math.random() * 9000).toString();
+        const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
+
+        let user = await User.findOne({ phoneNumber });
+        
+        if (!user) {
+            // 新用户注册
+            user = new User({ 
+                phoneNumber, 
+                referralCode: generateReferralCode() 
+            });
+
+            // 处理推荐关系
+            if (referrerCode) {
+                const referrer = await User.findOne({ referralCode: referrerCode.toUpperCase() });
+                if (referrer) {
+                    user.managedBy = referrer._id;
+                    console.log(`[Referral] New user ${phoneNumber} referred by ${referrer.phoneNumber}`);
+                }
+            }
+            await user.save();
+        }
+
+        user.otp = otp;
+        user.otpExpires = otpExpires;
+        await user.save();
+
+        // 4. 发送 OTP (模拟)
+        await sendWhatsAppOTP(phoneNumber, otp);
+
+        res.status(200).json({
+            success: true,
+            message: 'OTP sent successfully to WhatsApp',
+            // 生产环境下绝不返回 otp，此处为了方便测试小白
+            debug_otp: otp 
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
+// @desc    验证 OTP 并登录
+// @route   POST /api/auth/verify-otp
+exports.verifyOTP = async (req, res) => {
+    try {
+        const { phoneNumber, otp } = req.body;
+
+        if (!phoneNumber || !otp) {
+            return res.status(400).json({ message: 'Phone number and OTP are required' });
+        }
+
+        // 1. 查找用户
+        const user = await User.findOne({ phoneNumber });
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // 2. 验证 OTP 是否匹配且未过期
+        if (user.otp !== otp || user.otpExpires < Date.now()) {
+            return res.status(400).json({ message: 'Invalid or expired OTP' });
+        }
+
+        // 3. 验证成功，清除 OTP 并更新最后登录时间
+        user.otp = undefined;
+        user.otpExpires = undefined;
+        user.lastLogin = Date.now();
+        await user.save();
+
+        // 4. 生成 JWT Token
+        const token = jwt.sign(
+            { id: user._id, role: user.role },
+            process.env.JWT_SECRET,
+            { expiresIn: '30d' }
+        );
+
+        res.status(200).json({
+            success: true,
+            token,
+            user: {
+                id: user._id,
+                phoneNumber: user.phoneNumber,
+                role: user.role,
+                name: user.name,
+                balance: user.balance
+            }
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Server Error' });
+    }
+};
+
