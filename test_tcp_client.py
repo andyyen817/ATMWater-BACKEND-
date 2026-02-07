@@ -6,8 +6,13 @@ import time
 # TCP 客户端测试脚本
 # ========================================
 
-HOST = 'atmwater-backend.zeabur.app'
-PORT = 55036
+# Zeabur 端口映射：
+# 容器端口: 55036 (TCP)
+# 外部端口: 30235 (TCP)
+# 域名: hkg1.clusters.zeabur.com
+
+HOST = 'hkg1.clusters.zeabur.com'
+PORT = 30235  # Zeabur 分配的外部端口
 
 print('========================================')
 print('🧪 ATMWater TCP Server Test')

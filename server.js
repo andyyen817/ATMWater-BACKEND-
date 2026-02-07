@@ -154,9 +154,12 @@ app.get('/api/test', async (req, res) => {
             status: 'success',
             message: '✅ TCP server is running',
             details: {
-                port: TCP_PORT,
-                address: 'atmwater-backend.zeabur.app',
-                protocol: 'TCP'
+                containerPort: TCP_PORT,
+                externalPort: 30235,
+                externalHost: 'hkg1.clusters.zeabur.com',
+                internalHost: 'atmwater-backend.zeabur.app',
+                protocol: 'TCP',
+                note: 'Hardware devices should connect to hkg1.clusters.zeabur.com:30235'
             }
         });
 
