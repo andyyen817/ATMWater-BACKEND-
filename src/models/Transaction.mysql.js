@@ -132,14 +132,15 @@ const Transaction = sequelize.define('Transaction', {
 }, {
   tableName: 'transactions',
   timestamps: true,
+  underscored: true,
   indexes: [
-    { fields: ['userId'] },
-    { fields: ['unitId'] },
-    { fields: ['deviceId'] },
+    { fields: ['user_id'] },
+    { fields: ['unit_id'] },
+    { fields: ['device_id'] },
     { fields: ['type'] },
     { fields: ['status'] },
     { fields: ['rfid'] },
-    { fields: ['createdAt'] }
+    { fields: ['created_at'] }
   ]
 });
 

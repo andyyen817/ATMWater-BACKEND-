@@ -62,11 +62,12 @@ const PhysicalCard = sequelize.define('PhysicalCard', {
 }, {
   tableName: 'physical_cards',
   timestamps: true,
+  underscored: true,
   indexes: [
     { fields: ['rfid'], unique: true },
-    { fields: ['userId'] },
+    { fields: ['user_id'] },
     { fields: ['status'] },
-    { fields: ['batchId'] }
+    { fields: ['batch_id'] }
   ]
 });
 

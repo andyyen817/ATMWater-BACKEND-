@@ -105,10 +105,11 @@ const User = sequelize.define('User', {
 }, {
   tableName: 'users',
   timestamps: true,
+  underscored: true,
   indexes: [
     { fields: ['phone'], unique: true },
-    { fields: ['virtualRfid'], unique: true },
-    { fields: ['referralCode'], unique: true },
+    { fields: ['virtual_rfid'], unique: true },
+    { fields: ['referral_code'], unique: true },
     { fields: ['role'] }
   ]
 });

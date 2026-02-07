@@ -122,11 +122,12 @@ const Unit = sequelize.define('Unit', {
 }, {
   tableName: 'units',
   timestamps: true,
+  underscored: true,
   indexes: [
-    { fields: ['deviceId'], unique: true },
+    { fields: ['device_id'], unique: true },
     { fields: ['status'] },
-    { fields: ['stewardId'] },
-    { fields: ['isActive'] }
+    { fields: ['steward_id'] },
+    { fields: ['is_active'] }
   ]
 });
 
