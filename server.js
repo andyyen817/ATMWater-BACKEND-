@@ -42,8 +42,6 @@ app.get('/api/health', (req, res) => {
 // System Test Route (统一测试接口)
 // ========================================
 app.get('/api/test', async (req, res) => {
-    const { User, PhysicalCard, Unit, Transaction } = require('./src/models');
-
     const results = {
         timestamp: new Date().toISOString(),
         tests: []
@@ -92,49 +90,62 @@ app.get('/api/test', async (req, res) => {
             results.tests[1].details = {
                 existing: tableNames,
                 missing: missingTables,
-                hint: 'Run: node scripts/initDatabase.js'
+                hint: 'Click "Initialize Database" button below'
             };
         }
 
-        // 测试3：检查测试数据
-        results.tests.push({
-            name: 'Test Data',
-            status: 'running',
-            message: 'Checking test data...'
-        });
+        // 测试3：检查测试数据（只有在表存在时才检查）
+        if (missingTables.length === 0) {
+            results.tests.push({
+                name: 'Test Data',
+                status: 'running',
+                message: 'Checking test data...'
+            });
 
-        const testUser = await User.findOne({ where: { phone: '081234567890' } });
-        const testDevice = await Unit.findOne({ where: { deviceId: 'DEVICE001' } });
-        const testCard = await PhysicalCard.findOne({ where: { rfid: 'RFID001' } });
+            const { User, PhysicalCard, Unit } = require('./src/models');
 
-        if (testUser && testDevice && testCard) {
-            results.tests[2].status = 'success';
-            results.tests[2].message = '✅ Test data exists';
-            results.tests[2].details = {
-                user: {
-                    phone: testUser.phone,
-                    balance: testUser.balance,
-                    virtualRfid: testUser.virtualRfid
-                },
-                device: {
-                    deviceId: testDevice.deviceId,
-                    status: testDevice.status,
-                    location: testDevice.location
-                },
-                card: {
-                    rfid: testCard.rfid,
-                    status: testCard.status
-                }
-            };
+            const testUser = await User.findOne({ where: { phone: '081234567890' } });
+            const testDevice = await Unit.findOne({ where: { deviceId: 'DEVICE001' } });
+            const testCard = await PhysicalCard.findOne({ where: { rfid: 'RFID001' } });
+
+            if (testUser && testDevice && testCard) {
+                results.tests[2].status = 'success';
+                results.tests[2].message = '✅ Test data exists';
+                results.tests[2].details = {
+                    user: {
+                        phone: testUser.phone,
+                        balance: testUser.balance,
+                        virtualRfid: testUser.virtualRfid
+                    },
+                    device: {
+                        deviceId: testDevice.deviceId,
+                        status: testDevice.status,
+                        location: testDevice.location
+                    },
+                    card: {
+                        rfid: testCard.rfid,
+                        status: testCard.status
+                    }
+                };
+            } else {
+                results.tests[2].status = 'warning';
+                results.tests[2].message = '⚠️ Test data not found';
+                results.tests[2].details = {
+                    user: testUser ? 'exists' : 'missing',
+                    device: testDevice ? 'exists' : 'missing',
+                    card: testCard ? 'exists' : 'missing',
+                    hint: 'Click "Initialize Database" button below'
+                };
+            }
         } else {
-            results.tests[2].status = 'warning';
-            results.tests[2].message = '⚠️ Test data not found';
-            results.tests[2].details = {
-                user: testUser ? 'exists' : 'missing',
-                device: testDevice ? 'exists' : 'missing',
-                card: testCard ? 'exists' : 'missing',
-                hint: 'Run: node scripts/initDatabase.js'
-            };
+            results.tests.push({
+                name: 'Test Data',
+                status: 'warning',
+                message: '⚠️ Skipped (tables missing)',
+                details: {
+                    hint: 'Initialize database first'
+                }
+            });
         }
 
         // 测试4：TCP 服务器状态
@@ -196,6 +207,133 @@ app.get('/api/test', async (req, res) => {
         };
 
         res.status(500).json(results);
+    }
+});
+
+// ========================================
+// Database Initialization Route (一键初始化)
+// ========================================
+app.post('/api/init-database', async (req, res) => {
+    const bcrypt = require('bcryptjs');
+
+    try {
+        console.log('[Init] Starting database initialization...');
+
+        // 1. 同步数据库表结构
+        await sequelize.sync({ force: false, alter: true });
+        console.log('[Init] ✅ Database schema synchronized');
+
+        // 2. 加载模型
+        const { User, PhysicalCard, Unit } = require('./src/models');
+
+        // 3. 创建测试用户
+        const existingUser = await User.findOne({ where: { phone: '081234567890' } });
+        if (!existingUser) {
+            const hashedPassword = await bcrypt.hash('password123', 10);
+            await User.create({
+                phone: '081234567890',
+                password: hashedPassword,
+                pin: '1234',
+                name: 'Test User',
+                balance: 50000.00,
+                virtualRfid: 'VIRT_081234567890',
+                referralCode: 'TEST001',
+                role: 'user'
+            });
+            console.log('[Init] ✅ Created test user: 081234567890');
+        } else {
+            console.log('[Init] ℹ️ Test user already exists');
+        }
+
+        // 4. 创建管理员
+        const existingAdmin = await User.findOne({ where: { phone: '081234567891' } });
+        if (!existingAdmin) {
+            const hashedPassword = await bcrypt.hash('admin123', 10);
+            await User.create({
+                phone: '081234567891',
+                password: hashedPassword,
+                pin: '9999',
+                name: 'Admin User',
+                balance: 0.00,
+                virtualRfid: 'VIRT_081234567891',
+                referralCode: 'ADMIN001',
+                role: 'admin'
+            });
+            console.log('[Init] ✅ Created admin user: 081234567891');
+        } else {
+            console.log('[Init] ℹ️ Admin user already exists');
+        }
+
+        // 5. 创建测试设备
+        const existingDevice = await Unit.findOne({ where: { deviceId: 'DEVICE001' } });
+        if (!existingDevice) {
+            await Unit.create({
+                deviceId: 'DEVICE001',
+                password: 'pudow',
+                name: 'Test Water Dispenser',
+                type: 'WaterDispenser',
+                location: 'Jakarta Office',
+                address: 'Jl. Sudirman No. 123',
+                pricePerLiter: 500,
+                status: 'online',
+                isActive: true
+            });
+            console.log('[Init] ✅ Created test device: DEVICE001');
+        } else {
+            console.log('[Init] ℹ️ Test device already exists');
+        }
+
+        // 6. 创建测试 RFID 卡
+        const user = await User.findOne({ where: { phone: '081234567890' } });
+        const existingCard = await PhysicalCard.findOne({ where: { rfid: 'RFID001' } });
+        if (!existingCard && user) {
+            await PhysicalCard.create({
+                rfid: 'RFID001',
+                userId: user.id,
+                status: 'active',
+                batchId: 'BATCH001'
+            });
+            console.log('[Init] ✅ Created test RFID card: RFID001');
+        } else {
+            console.log('[Init] ℹ️ Test RFID card already exists');
+        }
+
+        res.status(200).json({
+            success: true,
+            message: '✅ Database initialized successfully',
+            data: {
+                testUser: {
+                    phone: '081234567890',
+                    password: 'password123',
+                    pin: '1234',
+                    balance: 'Rp 50,000',
+                    virtualRfid: 'VIRT_081234567890'
+                },
+                adminUser: {
+                    phone: '081234567891',
+                    password: 'admin123',
+                    pin: '9999'
+                },
+                testDevice: {
+                    deviceId: 'DEVICE001',
+                    password: 'pudow',
+                    location: 'Jakarta Office',
+                    price: 'Rp 500/L'
+                },
+                testCard: {
+                    rfid: 'RFID001',
+                    boundTo: '081234567890'
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('[Init] ❌ Initialization failed:', error.message);
+        res.status(500).json({
+            success: false,
+            message: '❌ Database initialization failed',
+            error: error.message
+        });
     }
 });
 
@@ -357,11 +495,51 @@ app.get('/test', (req, res) => {
             transform: translateY(-2px);
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         }
+        .init-btn {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 20px;
+            margin-left: 10px;
+            transition: all 0.3s;
+        }
+        .init-btn:hover {
+            background: #059669;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .init-btn:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+            transform: none;
+        }
         .footer {
             text-align: center;
             color: white;
             margin-top: 30px;
             font-size: 14px;
+        }
+        .alert {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            color: #92400e;
+        }
+        .alert.success {
+            background: #d1fae5;
+            border-left-color: #10b981;
+            color: #065f46;
+        }
+        .alert.error {
+            background: #fee2e2;
+            border-left-color: #ef4444;
+            color: #991b1b;
         }
     </style>
 </head>
@@ -372,6 +550,8 @@ app.get('/test', (req, res) => {
             <p>Comprehensive system health check and diagnostics</p>
         </div>
 
+        <div id="alert" style="display: none;"></div>
+
         <div id="loading" class="loading">
             <div class="spinner"></div>
             <p>Running system tests...</p>
@@ -380,7 +560,10 @@ app.get('/test', (req, res) => {
         <div id="results" style="display: none;">
             <div class="summary" id="summary"></div>
             <div class="test-list" id="testList"></div>
-            <button class="refresh-btn" onclick="runTests()">🔄 Refresh Tests</button>
+            <div>
+                <button class="refresh-btn" onclick="runTests()">🔄 Refresh Tests</button>
+                <button class="init-btn" id="initBtn" onclick="initDatabase()">🔧 Initialize Database</button>
+            </div>
         </div>
 
         <div class="footer">
@@ -392,6 +575,7 @@ app.get('/test', (req, res) => {
         async function runTests() {
             document.getElementById('loading').style.display = 'block';
             document.getElementById('results').style.display = 'none';
+            document.getElementById('alert').style.display = 'none';
 
             try {
                 const response = await fetch('/api/test');
@@ -404,6 +588,51 @@ app.get('/test', (req, res) => {
             } catch (error) {
                 document.getElementById('loading').innerHTML =
                     '<p style="color: #ef4444;">❌ Failed to run tests: ' + error.message + '</p>';
+            }
+        }
+
+        async function initDatabase() {
+            const btn = document.getElementById('initBtn');
+            const alertDiv = document.getElementById('alert');
+
+            // Disable button
+            btn.disabled = true;
+            btn.textContent = '⏳ Initializing...';
+
+            alertDiv.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/init-database', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alertDiv.className = 'alert success';
+                    alertDiv.innerHTML = '<strong>✅ Success!</strong> ' + data.message + '<br><br>Refreshing tests in 2 seconds...';
+                    alertDiv.style.display = 'block';
+
+                    // Auto refresh after 2 seconds
+                    setTimeout(() => {
+                        runTests();
+                    }, 2000);
+                } else {
+                    alertDiv.className = 'alert error';
+                    alertDiv.innerHTML = '<strong>❌ Error!</strong> ' + data.message;
+                    alertDiv.style.display = 'block';
+                }
+            } catch (error) {
+                alertDiv.className = 'alert error';
+                alertDiv.innerHTML = '<strong>❌ Error!</strong> Failed to initialize database: ' + error.message;
+                alertDiv.style.display = 'block';
+            } finally {
+                // Re-enable button
+                btn.disabled = false;
+                btn.textContent = '🔧 Initialize Database';
             }
         }
 
