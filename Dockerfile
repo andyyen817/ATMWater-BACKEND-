@@ -14,9 +14,8 @@ COPY . .
 # 环境变量
 ENV NODE_ENV=production
 
-# 移除硬编码的 PORT，让 Zeabur 注入
-# EXPOSE 只是声明，实际端口以 server.js 中监听的 process.env.PORT 为准
-EXPOSE 3000
+# 暴露端口
+EXPOSE 8080 55036
 
-# 启动命令
-CMD ["node", "src/server.js"]
+# 启动命令（使用根目录的 server.js）
+CMD ["node", "server.js"]
