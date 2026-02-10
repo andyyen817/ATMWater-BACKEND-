@@ -16,11 +16,11 @@ const HEARTBEAT_TIMEOUT = 180000; // 180秒超时 (硬件心跳间隔90秒 + 90�
 // ========================================
 const server = net.createServer((socket) => {
   const clientId = `${socket.remoteAddress}:${socket.remotePort}`;
-  console.log(`[TCP] 📥 New connection: ${clientId}`);
+  console.log(`[TCP] 🔌 New connection: ${clientId}`);
 
   // 立即发送连接确认（硬件协议要求）
   socket.write('CONNECT OK\n');
-  console.log(`[TCP] 📤 Sent connection confirmation: CONNECT OK`);
+  console.log(`[TCP] ⬅️ [SERVER→HARDWARE] Sent: CONNECT OK`);
 
   let deviceId = null;
   let buffer = '';
@@ -36,23 +36,23 @@ const server = net.createServer((socket) => {
   };
 
   resetHeartbeat();
-  
+
   // ========================================
   // 接收数据
   // ========================================
   socket.on('data', async (data) => {
     buffer += data.toString();
-    
+
     // 处理多条消息（以 \n 分隔）
     const messages = buffer.split('\n');
     buffer = messages.pop(); // 保留不完整的消息
-    
+
     for (const message of messages) {
       if (!message.trim()) continue;
 
       try {
         // 记录原始数据（用于调试）
-        console.log(`[TCP] 📨 Raw data from ${deviceId || clientId}:`, JSON.stringify(message));
+        console.log(`[TCP] ➡️ [HARDWARE→SERVER] Received raw:`, JSON.stringify(message));
         console.log(`[TCP] 📏 Data length: ${message.length}, First 100 chars:`, message.substring(0, 100));
 
         // 清理数据：移除所有控制字符
@@ -70,15 +70,15 @@ const server = net.createServer((socket) => {
         }
 
         const cmd = JSON.parse(cleanMessage);
-        console.log(`[TCP] 📤 Received from ${deviceId || clientId}:`, cmd);
+        console.log(`[TCP] ➡️ [HARDWARE→SERVER] Parsed command:`, cmd);
 
         const response = await handleCommand(cmd, socket);
 
         if (response) {
           const responseStr = JSON.stringify(response) + '\n';
           socket.write(responseStr);
-          console.log(`[TCP] 📥 Sent to ${deviceId || clientId}:`, response);
-          console.log(`[TCP] 📤 Raw response sent:`, JSON.stringify(responseStr));
+          console.log(`[TCP] ⬅️ [SERVER→HARDWARE] Sending response:`, response);
+          console.log(`[TCP] ⬅️ [SERVER→HARDWARE] Raw JSON sent:`, JSON.stringify(responseStr));
         }
 
         // 更新设备ID
