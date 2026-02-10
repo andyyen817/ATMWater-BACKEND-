@@ -9,7 +9,7 @@ const deviceConnections = new Map();
 
 // TCP 服务器配置
 const TCP_PORT = process.env.TCP_PORT || 55036;
-const HEARTBEAT_TIMEOUT = 120000; // 120秒超时
+const HEARTBEAT_TIMEOUT = 180000; // 180秒超时 (硬件心跳间隔90秒 + 90秒容错)
 
 // ========================================
 // TCP 服务器
@@ -45,29 +45,38 @@ const server = net.createServer((socket) => {
     
     for (const message of messages) {
       if (!message.trim()) continue;
-      
+
       try {
-        const cmd = JSON.parse(message);
+        // 记录原始数据（用于调试）
+        console.log(`[TCP] 📨 Raw data from ${deviceId || clientId}:`, JSON.stringify(message));
+        console.log(`[TCP] 📏 Data length: ${message.length}, First 100 chars:`, message.substring(0, 100));
+
+        // 清理数据：移除所有控制字符和多余空白
+        const cleanMessage = message.replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim();
+        console.log(`[TCP] 🧹 Cleaned data:`, JSON.stringify(cleanMessage));
+
+        const cmd = JSON.parse(cleanMessage);
         console.log(`[TCP] 📤 Received from ${deviceId || clientId}:`, cmd);
-        
+
         const response = await handleCommand(cmd, socket);
-        
+
         if (response) {
           socket.write(JSON.stringify(response) + '\n');
           console.log(`[TCP] 📥 Sent to ${deviceId || clientId}:`, response);
         }
-        
+
         // 更新设备ID
         if (cmd.DId) {
           deviceId = cmd.DId;
           deviceConnections.set(deviceId, socket);
         }
-        
+
         // 重置心跳计时器
         resetHeartbeat();
-        
+
       } catch (error) {
         console.error(`[TCP] ❌ Parse error:`, error.message);
+        console.error(`[TCP] ❌ Failed message:`, JSON.stringify(message));
         socket.write(JSON.stringify({
           Cmd: 'ER',
           Msg: 'Invalid JSON format'
@@ -101,23 +110,35 @@ const server = net.createServer((socket) => {
 // ========================================
 async function handleCommand(cmd, socket) {
   const { Cmd, DId } = cmd;
-  
+
   switch (Cmd) {
     case 'AU': // 设备认证
       return await handleAuth(cmd);
-      
+
     case 'HB': // 心跳
       return await handleHeartbeat(cmd);
-      
-    case 'SW': // 刷卡出水
+
+    case 'WR': // 用水数据记录上报（硬件协议核心指令）
+      return await handleWaterRecord(cmd);
+
+    case 'Mk': // 制水记录
+      return await handleMakeWater(cmd);
+
+    case 'AddMoney': // 充值命令
+      return await handleAddMoney(cmd);
+
+    case 'OpenWater': // 扫码放水
+      return await handleOpenWater(cmd);
+
+    case 'SW': // 刷卡出水（保留兼容旧系统）
       return await handleSwipeWater(cmd);
-      
+
     case 'DS': // 设备状态上报
       return await handleDeviceStatus(cmd);
-      
+
     case 'WQ': // 水质数据上报
       return await handleWaterQuality(cmd);
-      
+
     default:
       return {
         Cmd: 'ER',
@@ -130,12 +151,12 @@ async function handleCommand(cmd, socket) {
 // AU - 设备认证
 // ========================================
 async function handleAuth(cmd) {
-  const { DId, Type, Pwd } = cmd;
-  
+  const { DId, Type, Pwd, Ver } = cmd;
+
   try {
     // 查询设备
     const unit = await Unit.findOne({ where: { deviceId: DId } });
-    
+
     if (!unit) {
       return {
         Cmd: 'AU',
@@ -143,7 +164,7 @@ async function handleAuth(cmd) {
         Msg: 'Device not found'
       };
     }
-    
+
     // 验证密码
     if (unit.password !== Pwd) {
       return {
@@ -152,21 +173,22 @@ async function handleAuth(cmd) {
         Msg: 'Invalid password'
       };
     }
-    
-    // 更新设备状态
+
+    // 更新设备状态和固件版本
     await unit.update({
       status: 'Online',
-      lastHeartbeatAt: new Date()
+      lastHeartbeatAt: new Date(),
+      firmwareVersion: Ver || null
     });
-    
-    console.log(`[TCP] ✅ Device authenticated: ${DId}`);
-    
+
+    console.log(`[TCP] ✅ Device authenticated: ${DId}, Version: ${Ver || 'Unknown'}`);
+
+    // 返回服务器时间戳（硬件协议格式）
     return {
       Cmd: 'AU',
-      Result: 'OK',
-      Msg: 'Authentication successful'
+      Time: Math.floor(Date.now() / 1000)
     };
-    
+
   } catch (error) {
     console.error('[TCP] Auth error:', error.message);
     return {
@@ -181,24 +203,32 @@ async function handleAuth(cmd) {
 // HB - 心跳
 // ========================================
 async function handleHeartbeat(cmd) {
-  const { DId } = cmd;
-  
+  const { DId, Errs } = cmd;
+
   try {
-    // 更新设备心跳时间
-    await Unit.update(
-      { 
-        lastHeartbeatAt: new Date(),
-        status: 'Online'
-      },
-      { where: { deviceId: DId } }
-    );
-    
-    return {
-      Cmd: 'HB',
-      Result: 'OK',
-      ServerTime: new Date().toISOString()
+    const updateData = {
+      lastHeartbeatAt: new Date(),
+      status: 'Online'
     };
-    
+
+    // 处理告警信息
+    if (Errs && Array.isArray(Errs) && Errs.length > 0) {
+      updateData.status = 'Error';
+      updateData.errorCodes = JSON.stringify(Errs);
+      console.log(`[TCP] ⚠️ Device errors: ${DId}`, Errs);
+    } else {
+      // 清除告警信息
+      updateData.errorCodes = null;
+    }
+
+    // 更新设备心跳时间和状态
+    await Unit.update(updateData, { where: { deviceId: DId } });
+
+    // 返回简单响应（硬件协议格式）
+    return {
+      Cmd: 'HB'
+    };
+
   } catch (error) {
     console.error('[TCP] Heartbeat error:', error.message);
     return null; // 心跳失败不返回错误
@@ -358,6 +388,303 @@ async function handleWaterQuality(cmd) {
   } catch (error) {
     console.error('[TCP] Water quality error:', error.message);
     return null;
+  }
+}
+
+// ========================================
+// WR - 用水数据记录上报 (硬件协议核心指令)
+// ========================================
+async function handleWaterRecord(cmd) {
+  const { DId, TE, RFID, PWM, Money, FT, Tds, IDS, RE, Tmp } = cmd;
+
+  try {
+    // 1. 查找设备
+    const unit = await Unit.findOne({ where: { deviceId: DId } });
+    if (!unit) {
+      return {
+        Cmd: 'WR',
+        RFID: RFID,
+        RE: RE,
+        RT: 'Fail',
+        LeftL: '-1',
+        LeftM: '-1',
+        DayLmt: '-1'
+      };
+    }
+
+    // 2. 查找用户（通过实体卡或虚拟卡）
+    let user = null;
+    let cardType = null;
+
+    // 先查找实体卡
+    const physicalCard = await PhysicalCard.findOne({
+      where: { rfid: RFID, status: 'Active' },
+      include: [{ model: User, as: 'user' }]
+    });
+
+    if (physicalCard && physicalCard.user) {
+      user = physicalCard.user;
+      cardType = 'Physical';
+    } else {
+      // 查找虚拟卡
+      user = await User.findOne({ where: { virtualRfid: RFID } });
+      cardType = 'Virtual';
+    }
+
+    if (!user) {
+      return {
+        Cmd: 'WR',
+        RFID: RFID,
+        RE: RE,
+        RT: 'Fail',
+        LeftL: '-1',
+        LeftM: '-1',
+        DayLmt: '-1'
+      };
+    }
+
+    // 3. 计算水量（PWM脉冲数转换为升）
+    const pulseCount = parseInt(PWM) || 0;
+    const pulsePerLiter = parseFloat(unit.pulsePerLiter) || 1.0;
+    const volume = pulseCount / pulsePerLiter;
+    const amount = parseFloat(Money) || 0;
+
+    // 4. 扣款
+    const balanceBefore = user.balance;
+    const balanceAfter = balanceBefore - amount;
+
+    // 注意：硬件已经出水，即使余额不足也要记录
+    await user.update({ balance: balanceAfter });
+
+    // 5. 创建交易记录
+    const transaction = await Transaction.create({
+      userId: user.id,
+      unitId: unit.id,
+      deviceId: DId,
+      type: 'WaterPurchase',
+      amount: amount,
+      balanceBefore: balanceBefore,
+      balanceAfter: balanceAfter,
+      volume: volume,
+      pricePerLiter: volume > 0 ? amount / volume : 0,
+      rfid: RFID,
+      cardType: cardType,
+      pulseCount: pulseCount,
+      inputTds: parseInt(IDS) || null,
+      outputTds: parseInt(Tds) || null,
+      waterTemp: parseFloat(Tmp) || null,
+      recordId: RE,
+      dispensingTime: parseInt(FT) || null,
+      status: 'Completed',
+      completedAt: TE ? new Date(parseInt(TE)) : new Date()
+    });
+
+    // 6. 更新设备水质数据
+    await unit.update({
+      tdsValue: parseInt(Tds) || null,
+      temperature: parseFloat(Tmp) || null,
+      lastHeartbeatAt: new Date()
+    });
+
+    console.log(`[TCP] ✅ Water record: ${volume.toFixed(2)}L, User: ${user.phone}, Amount: ${amount}, Balance: ${balanceAfter}`);
+
+    // 7. 返回响应（硬件协议格式）
+    return {
+      Cmd: 'WR',
+      RFID: RFID,
+      RE: RE,
+      RT: 'OK',
+      LeftL: '-1',  // 剩余升数（-1表示不限制）
+      LeftM: balanceAfter.toString(),  // 剩余金额
+      DayLmt: '-1'  // 每日限额（-1表示不限制）
+    };
+
+  } catch (error) {
+    console.error('[TCP] Water record error:', error.message);
+    return {
+      Cmd: 'WR',
+      RFID: RFID,
+      RE: RE,
+      RT: 'Fail',
+      LeftL: '-1',
+      LeftM: '-1',
+      DayLmt: '-1'
+    };
+  }
+}
+
+// ========================================
+// Mk - 制水记录
+// ========================================
+async function handleMakeWater(cmd) {
+  const { DId, FT, PWM, TDS, IDS, RC } = cmd;
+
+  try {
+    const unit = await Unit.findOne({ where: { deviceId: DId } });
+
+    if (!unit) {
+      return {
+        Cmd: 'Mk',
+        RT: 'Fail',
+        RC: RC
+      };
+    }
+
+    // 更新设备水质信息
+    await unit.update({
+      tdsValue: parseInt(TDS) || null,
+      lastHeartbeatAt: new Date()
+    });
+
+    console.log(`[TCP] ✅ Make water record: ${DId}, Time: ${FT}s, PWM: ${PWM}, TDS: ${TDS}`);
+
+    return {
+      Cmd: 'Mk',
+      RT: 'OK',
+      RC: RC
+    };
+
+  } catch (error) {
+    console.error('[TCP] Make water error:', error.message);
+    return {
+      Cmd: 'Mk',
+      RT: 'Fail',
+      RC: RC
+    };
+  }
+}
+
+// ========================================
+// AddMoney - 充值命令
+// ========================================
+async function handleAddMoney(cmd) {
+  const { RFID, RE, LeftL, LeftM } = cmd;
+
+  try {
+    // 查找用户
+    let user = null;
+    const physicalCard = await PhysicalCard.findOne({
+      where: { rfid: RFID, status: 'Active' },
+      include: [{ model: User, as: 'user' }]
+    });
+
+    if (physicalCard && physicalCard.user) {
+      user = physicalCard.user;
+    } else {
+      user = await User.findOne({ where: { virtualRfid: RFID } });
+    }
+
+    if (!user) {
+      return {
+        Cmd: 'AddMoney',
+        RT: 'Fail',
+        RC: RE
+      };
+    }
+
+    // 充值或扣款
+    const amount = parseFloat(LeftM) || 0;
+    const balanceBefore = user.balance;
+    const balanceAfter = balanceBefore + amount;
+
+    await user.update({ balance: balanceAfter });
+
+    // 创建交易记录
+    await Transaction.create({
+      userId: user.id,
+      type: amount > 0 ? 'TopUp' : 'Withdrawal',
+      amount: Math.abs(amount),
+      balanceBefore: balanceBefore,
+      balanceAfter: balanceAfter,
+      rfid: RFID,
+      recordId: RE,
+      status: 'Completed',
+      completedAt: new Date()
+    });
+
+    console.log(`[TCP] ✅ Add money: ${RFID}, Amount: ${amount}, Balance: ${balanceAfter}`);
+
+    return {
+      Cmd: 'AddMoney',
+      RT: 'OK',
+      RC: RE
+    };
+
+  } catch (error) {
+    console.error('[TCP] Add money error:', error.message);
+    return {
+      Cmd: 'AddMoney',
+      RT: 'Fail',
+      RC: RE
+    };
+  }
+}
+
+// ========================================
+// OpenWater - 扫码放水
+// ========================================
+async function handleOpenWater(cmd) {
+  const { RFID, Money, PWM, Type, RE } = cmd;
+
+  try {
+    // 查找用户（虚拟账户，以'w'开头）
+    const user = await User.findOne({ where: { virtualRfid: RFID } });
+
+    if (!user) {
+      return {
+        Cmd: 'OpenWater',
+        RT: 'Fail',
+        RC: RE
+      };
+    }
+
+    const amount = parseFloat(Money) || 0;
+
+    // 检查余额
+    if (user.balance < amount) {
+      return {
+        Cmd: 'OpenWater',
+        RT: 'Fail',
+        RC: RE
+      };
+    }
+
+    // 扣款
+    const balanceBefore = user.balance;
+    const balanceAfter = balanceBefore - amount;
+
+    await user.update({ balance: balanceAfter });
+
+    // 创建交易记录
+    await Transaction.create({
+      userId: user.id,
+      type: 'WaterPurchase',
+      amount: amount,
+      balanceBefore: balanceBefore,
+      balanceAfter: balanceAfter,
+      rfid: RFID,
+      pulseCount: parseInt(PWM) || null,
+      recordId: RE,
+      description: `Scan QR - ${Type}`,
+      status: 'Completed',
+      completedAt: new Date()
+    });
+
+    console.log(`[TCP] ✅ Open water: ${RFID}, Amount: ${amount}, Type: ${Type}, Balance: ${balanceAfter}`);
+
+    return {
+      Cmd: 'OpenWater',
+      RT: 'OK',
+      RC: RE
+    };
+
+  } catch (error) {
+    console.error('[TCP] Open water error:', error.message);
+    return {
+      Cmd: 'OpenWater',
+      RT: 'Fail',
+      RC: RE
+    };
   }
 }
 
