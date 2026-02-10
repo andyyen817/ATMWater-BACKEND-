@@ -168,12 +168,12 @@ async function handleGPRSTest(cmd) {
   console.log(`[TCP] 📡 GPRS test from device: ${DId}`);
 
   // 按照硬件要求的格式返回
-  // 必须包含：Cmd, DId, PTW(密码), Type(类型)
+  // 尝试填入"ok"作为确认值
   return {
     Cmd: 'GT',
     DId: DId,
-    PTW: '',
-    Type: ''
+    PTW: 'ok',
+    Type: 'ok'
   };
 }
 
