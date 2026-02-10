@@ -71,8 +71,10 @@ const server = net.createServer((socket) => {
         const response = await handleCommand(cmd, socket);
 
         if (response) {
-          socket.write(JSON.stringify(response) + '\n');
+          const responseStr = JSON.stringify(response) + '\n';
+          socket.write(responseStr);
           console.log(`[TCP] 📥 Sent to ${deviceId || clientId}:`, response);
+          console.log(`[TCP] 📤 Raw response sent:`, JSON.stringify(responseStr));
         }
 
         // 更新设备ID
@@ -167,13 +169,12 @@ async function handleGPRSTest(cmd) {
 
   console.log(`[TCP] 📡 GPRS test from device: ${DId}`);
 
-  // 按照硬件要求的格式返回
-  // 尝试填入"ok"作为确认值
+  // 按照硬件工程师确认：PTW和Type使用空字符串
   return {
     Cmd: 'GT',
     DId: DId,
-    PTW: 'ok',
-    Type: 'ok'
+    PTW: '',
+    Type: ''
   };
 }
 
