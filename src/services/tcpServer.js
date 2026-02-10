@@ -51,9 +51,19 @@ const server = net.createServer((socket) => {
         console.log(`[TCP] 📨 Raw data from ${deviceId || clientId}:`, JSON.stringify(message));
         console.log(`[TCP] 📏 Data length: ${message.length}, First 100 chars:`, message.substring(0, 100));
 
-        // 清理数据：移除所有控制字符和多余空白
-        const cleanMessage = message.replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim();
-        console.log(`[TCP] 🧹 Cleaned data:`, JSON.stringify(cleanMessage));
+        // 清理数据：移除所有控制字符
+        let cleanMessage = message.replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim();
+
+        // 提取JSON部分：硬件可能在JSON后面附加调试信息
+        // 例如：{"Cmd":"GT","DId":"xxx"}GPRS reboot by GPRS_REBOOT!!!
+        // 我们只需要JSON部分
+        const jsonMatch = cleanMessage.match(/^(\{[^}]*\})/);
+        if (jsonMatch) {
+          cleanMessage = jsonMatch[1];
+          console.log(`[TCP] 🧹 Extracted JSON:`, cleanMessage);
+        } else {
+          console.log(`[TCP] 🧹 Cleaned data:`, JSON.stringify(cleanMessage));
+        }
 
         const cmd = JSON.parse(cleanMessage);
         console.log(`[TCP] 📤 Received from ${deviceId || clientId}:`, cmd);
@@ -112,6 +122,9 @@ async function handleCommand(cmd, socket) {
   const { Cmd, DId } = cmd;
 
   switch (Cmd) {
+    case 'GT': // GPRS测试/初始化（硬件启动时发送）
+      return await handleGPRSTest(cmd);
+
     case 'AU': // 设备认证
       return await handleAuth(cmd);
 
@@ -145,6 +158,21 @@ async function handleCommand(cmd, socket) {
         Msg: `Unknown command: ${Cmd}`
       };
   }
+}
+
+// ========================================
+// GT - GPRS测试/初始化
+// ========================================
+async function handleGPRSTest(cmd) {
+  const { DId } = cmd;
+
+  console.log(`[TCP] 📡 GPRS test from device: ${DId}`);
+
+  // 返回时间戳，让设备知道服务器在线
+  return {
+    Cmd: 'GT',
+    Time: Math.floor(Date.now() / 1000)
+  };
 }
 
 // ========================================
