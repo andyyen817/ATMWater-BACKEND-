@@ -18,9 +18,9 @@ const server = net.createServer((socket) => {
   const clientId = `${socket.remoteAddress}:${socket.remotePort}`;
   console.log(`[TCP] 🔌 New connection: ${clientId}`);
 
-  // 立即发送连接确认（硬件协议要求）
-  socket.write('CONNECT OK\n');
-  console.log(`[TCP] ⬅️ [SERVER→HARDWARE] Sent: CONNECT OK`);
+  // 注释掉CONNECT OK，因为旧服务器可能不发送这个
+  // socket.write('CONNECT OK\n');
+  // console.log(`[TCP] ⬅️ [SERVER→HARDWARE] Sent: CONNECT OK`);
 
   let deviceId = null;
   let buffer = '';
