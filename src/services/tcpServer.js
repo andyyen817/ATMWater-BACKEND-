@@ -173,12 +173,12 @@ async function handleGPRSTest(cmd) {
 
   console.log(`[TCP] 📡 GPRS test from device: ${DId}`);
 
-  // 按照硬件工程师确认：PTW和Type使用空字符串
+  // 按照硬件工程师最新确认：Type应该是"PDF321"
   return {
     Cmd: 'GT',
     DId: DId,
     PTW: '',
-    Type: ''
+    Type: 'PDF321'
   };
 }
 
