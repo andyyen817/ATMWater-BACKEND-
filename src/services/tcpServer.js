@@ -153,10 +153,9 @@ async function handleCommand(cmd, socket) {
       return await handleWaterQuality(cmd);
 
     default:
-      return {
-        Cmd: 'ER',
-        Msg: `Unknown command: ${Cmd}`
-      };
+      // 对不认识的命令返回 {ok}
+      console.log(`[TCP] ⚠️ Unknown command: ${Cmd}, responding with {ok}`);
+      return { ok: true };
   }
 }
 
@@ -168,10 +167,13 @@ async function handleGPRSTest(cmd) {
 
   console.log(`[TCP] 📡 GPRS test from device: ${DId}`);
 
-  // 返回时间戳，让设备知道服务器在线
+  // 按照硬件要求的格式返回
+  // 必须包含：Cmd, DId, PTW(密码), Type(类型)
   return {
     Cmd: 'GT',
-    Time: Math.floor(Date.now() / 1000)
+    DId: DId,
+    PTW: '',
+    Type: ''
   };
 }
 
