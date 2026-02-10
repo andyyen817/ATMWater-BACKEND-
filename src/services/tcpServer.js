@@ -17,11 +17,15 @@ const HEARTBEAT_TIMEOUT = 180000; // 180秒超时 (硬件心跳间隔90秒 + 90�
 const server = net.createServer((socket) => {
   const clientId = `${socket.remoteAddress}:${socket.remotePort}`;
   console.log(`[TCP] 📥 New connection: ${clientId}`);
-  
+
+  // 立即发送连接确认（硬件协议要求）
+  socket.write('CONNECT OK\n');
+  console.log(`[TCP] 📤 Sent connection confirmation: CONNECT OK`);
+
   let deviceId = null;
   let buffer = '';
   let heartbeatTimer = null;
-  
+
   // 设置心跳超时检测
   const resetHeartbeat = () => {
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
@@ -30,7 +34,7 @@ const server = net.createServer((socket) => {
       socket.end();
     }, HEARTBEAT_TIMEOUT);
   };
-  
+
   resetHeartbeat();
   
   // ========================================
