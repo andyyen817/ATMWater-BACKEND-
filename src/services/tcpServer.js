@@ -82,45 +82,51 @@ const server = net.createServer((socket) => {
         // 清理数据：移除所有控制字符
         let cleanMessage = message.replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim();
 
-        // 提取JSON部分：硬件可能在JSON后面附加调试信息
-        // 例如：{"Cmd":"GT","DId":"xxx"}GPRS reboot by GPRS_REBOOT!!!
-        // 我们只需要JSON部分
-        const jsonMatch = cleanMessage.match(/^(\{[^}]*\})/);
-        if (jsonMatch) {
-          cleanMessage = jsonMatch[1];
-          log(`[TCP] 🧹 Extracted JSON:`, cleanMessage);
+        // 提取所有JSON对象：硬件可能在一条消息中发送多个JSON
+        // 例如：{"Cmd":"GT","DId":"xxx"}{"Cmd":"AU","DId":"xxx","Pwd":"pudow"}
+        // 使用全局匹配提取所有JSON对象
+        const jsonMatches = cleanMessage.match(/\{[^}]*\}/g);
+
+        if (jsonMatches && jsonMatches.length > 0) {
+          log(`[TCP] 🧹 Found ${jsonMatches.length} JSON object(s) in message`);
+
+          // 处理每个JSON对象
+          for (const jsonStr of jsonMatches) {
+            try {
+              const cmd = JSON.parse(jsonStr);
+              log(`[TCP] ➡️ [HARDWARE→SERVER] Parsed command:`, cmd);
+
+              const response = await handleCommand(cmd, socket);
+
+              if (response) {
+                const responseStr = JSON.stringify(response) + '\n';
+                socket.write(responseStr);
+                log(`[TCP] ⬅️ [SERVER→HARDWARE] Sending response:`, response);
+                log(`[TCP] ⬅️ [SERVER→HARDWARE] Raw JSON sent:`, JSON.stringify(responseStr));
+              }
+
+              // 更新设备ID
+              if (cmd.DId) {
+                deviceId = cmd.DId;
+                deviceConnections.set(deviceId, socket);
+              }
+
+              // 重置心跳计时器
+              resetHeartbeat();
+
+            } catch (parseError) {
+              logError(`[TCP] ❌ Failed to parse JSON object:`, jsonStr);
+              logError(`[TCP] ❌ Parse error:`, parseError.message);
+            }
+          }
         } else {
-          log(`[TCP] 🧹 Cleaned data:`, JSON.stringify(cleanMessage));
+          // 没有找到JSON对象
+          log(`[TCP] ⚠️ No JSON object found in message:`, cleanMessage);
         }
-
-        const cmd = JSON.parse(cleanMessage);
-        log(`[TCP] ➡️ [HARDWARE→SERVER] Parsed command:`, cmd);
-
-        const response = await handleCommand(cmd, socket);
-
-        if (response) {
-          const responseStr = JSON.stringify(response) + '\n';
-          socket.write(responseStr);
-          log(`[TCP] ⬅️ [SERVER→HARDWARE] Sending response:`, response);
-          log(`[TCP] ⬅️ [SERVER→HARDWARE] Raw JSON sent:`, JSON.stringify(responseStr));
-        }
-
-        // 更新设备ID
-        if (cmd.DId) {
-          deviceId = cmd.DId;
-          deviceConnections.set(deviceId, socket);
-        }
-
-        // 重置心跳计时器
-        resetHeartbeat();
 
       } catch (error) {
-        logError(`[TCP] ❌ Parse error:`, error.message);
+        logError(`[TCP] ❌ Message processing error:`, error.message);
         logError(`[TCP] ❌ Failed message:`, JSON.stringify(message));
-        socket.write(JSON.stringify({
-          Cmd: 'ER',
-          Msg: 'Invalid JSON format'
-        }) + '\n');
       }
     }
   });
