@@ -196,12 +196,14 @@ async function handleGPRSTest(cmd, socket) {
 
   log(`[TCP] 📡 GPRS test from device: ${DId}`);
 
-  // GPRS模块需要GT命令的响应来确认连接
-  // 发送简单的"OK"响应，而不是JSON格式
-  socket.write('OK\n');
-  log(`[TCP] 📡 GT response sent: OK`);
-
-  return null; // 不通过handleCommand返回JSON响应
+  // GT命令需要返回JSON格式的响应
+  // 根据硬件工程师确认，返回设备类型信息
+  return {
+    Cmd: 'GT',
+    DId: DId,
+    PTW: '',
+    Type: 'PDF321'
+  };
 }
 
 // ========================================
