@@ -1,58 +1,184 @@
-const mongoose = require('mongoose');
+// ATMWater-BACKEND/src/models/Transaction.mysql.js
+// MySQL 版本的交易模型
 
-const transactionSchema = new mongoose.Schema({
-    userId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const Transaction = sequelize.define('Transaction', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  
+  // ========== 用户信息 ==========
+  userId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    comment: '用户ID（外键）',
+    references: {
+      model: 'users',
+      key: 'id'
     },
-    type: {
-        type: String,
-        enum: ['TopUp', 'WaterPurchase', 'SubscriptionFee', 'Withdrawal'],
-        required: true
+    onUpdate: 'CASCADE',
+    onDelete: 'CASCADE'
+  },
+  
+  // ========== 设备信息 ==========
+  unitId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: '设备ID（外键）',
+    references: {
+      model: 'units',
+      key: 'id'
     },
-    amount: {
-        type: Number,
-        required: true
-    },
-    currency: {
-        type: String,
-        default: 'IDR'
-    },
-    status: {
-        type: String,
-        enum: ['Pending', 'Completed', 'Failed', 'Expired'],
-        default: 'Pending'
-    },
-    paymentGateway: {
-        type: String,
-        enum: ['Xendit', 'Internal', 'Manual'],
-        default: 'Xendit'
-    },
-    externalId: {
-        type: String, // Xendit 的 Invoice ID 或交易单号
-        unique: true,
-        sparse: true
-    },
-    paymentUrl: {
-        type: String // 支付跳转链接
-    },
-    description: {
-        type: String
-    },
-    metadata: {
-        type: Object // 存储 Xendit 返回的原始数据
-    }
+    onUpdate: 'CASCADE',
+    onDelete: 'SET NULL'
+  },
+  
+  deviceId: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    comment: '设备ID（冗余字段，便于查询）'
+  },
+  
+  // ========== 交易类型 ==========
+  type: {
+    type: DataTypes.ENUM('TopUp', 'WaterPurchase', 'Withdrawal', 'Refund'),
+    allowNull: false,
+    comment: '交易类型'
+  },
+  
+  // ========== 金额信息 ==========
+  amount: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: false,
+    comment: '交易金额（印尼盾）'
+  },
+  
+  balanceBefore: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    comment: '交易前余额'
+  },
+  
+  balanceAfter: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    comment: '交易后余额'
+  },
+  
+  // ========== 出水信息（仅 WaterPurchase 类型）==========
+  volume: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    comment: '出水量（升）'
+  },
+
+  pricePerLiter: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    comment: '每升价格（印尼盾）'
+  },
+
+  pulseCount: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: '脉冲数（PWM）'
+  },
+
+  inputTds: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: '进水TDS值'
+  },
+
+  outputTds: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: '纯水TDS值'
+  },
+
+  waterTemp: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: true,
+    comment: '水温（摄氏度）'
+  },
+
+  recordId: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    comment: '硬件记录ID（RE字段）'
+  },
+
+  dispensingTime: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: '放水时间（秒）'
+  },
+  
+  // ========== RFID 信息 ==========
+  rfid: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    comment: 'RFID卡号（实体卡或虚拟卡）'
+  },
+  
+  cardType: {
+    type: DataTypes.ENUM('Physical', 'Virtual'),
+    allowNull: true,
+    comment: '卡片类型'
+  },
+  
+  // ========== 交易状态 ==========
+  status: {
+    type: DataTypes.ENUM('Pending', 'Completed', 'Failed', 'Cancelled'),
+    defaultValue: 'Pending',
+    allowNull: false,
+    comment: '交易状态'
+  },
+  
+  // ========== 第三方支付信息 ==========
+  paymentMethod: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    comment: '支付方式（Xendit, Manual等）'
+  },
+  
+  externalId: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+    comment: '第三方交易ID'
+  },
+  
+  // ========== 备注 ==========
+  description: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+    comment: '交易描述'
+  },
+  
+  // ========== 时间戳 ==========
+  completedAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    comment: '完成时间'
+  }
 }, {
-    timestamps: true
+  tableName: 'transactions',
+  timestamps: true,
+  underscored: true,
+  indexes: [
+    { fields: ['user_id'] },
+    { fields: ['unit_id'] },
+    { fields: ['device_id'] },
+    { fields: ['type'] },
+    { fields: ['status'] },
+    { fields: ['rfid'] },
+    { fields: ['created_at'] }
+  ]
 });
-
-// [P3-INF-002] 针对海量交易数据的索引优化
-transactionSchema.index({ userId: 1, createdAt: -1 });
-transactionSchema.index({ type: 1, status: 1 });
-transactionSchema.index({ createdAt: 1 }); // 用于财务报表按时间范围查询
-
-const Transaction = mongoose.model('Transaction', transactionSchema);
 
 module.exports = Transaction;
 

@@ -694,12 +694,15 @@ app.get('/test', (req, res) => {
 });
 
 // ========================================
-// Routes (暂时注释，等模型创建完成后再启用)
+// Routes (已启用 - Stage 1 完成)
 // ========================================
-// app.use('/api/auth', require('./src/routes/authRoutes'));
-// app.use('/api/wallet', require('./src/routes/walletRoutes'));
-// app.use('/api/iot', require('./src/routes/iotRoutes'));
-// app.use('/api/users', require('./src/routes/userRoutes'));
+app.use('/api/auth', require('./src/routes/authRoutes'));
+app.use('/api/wallet', require('./src/routes/walletRoutes'));
+app.use('/api/iot', require('./src/routes/iotRoutes'));
+app.use('/api/users', require('./src/routes/userRoutes'));
+app.use('/api/dashboard', require('./src/routes/dashboardRoutes'));
+app.use('/api/admin', require('./src/routes/adminRoutes'));
+app.use('/api/partners', require('./src/routes/partnerRoutes'));
 
 // ========================================
 // Error Handler
@@ -733,6 +736,11 @@ const startServer = async () => {
             console.log(`[HTTP] ✅ Server running on port ${PORT}`);
             console.log(`[HTTP] 🌍 Health check: http://localhost:${PORT}/api/health`);
         });
+
+        // 3.5. 初始化 WebSocket 服务
+        const websocketService = require('./src/services/websocketService');
+        websocketService.initialize(server);
+        console.log('[WebSocket] ✅ WebSocket service initialized');
 
         // 4. 启动 TCP 服务器
         const tcpServer = require('./src/services/tcpServer');

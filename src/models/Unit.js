@@ -1,78 +1,156 @@
-const mongoose = require('mongoose');
+// ATMWater-BACKEND/src/models/Unit.mysql.js
+// MySQL 版本的设备模型
 
-const unitSchema = new mongoose.Schema({
-    unitId: {
-        type: String,
-        required: [true, 'Unit ID is required'],
-        unique: true,
-        trim: true
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const Unit = sequelize.define('Unit', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  
+  // ========== 设备基本信息 ==========
+  deviceId: {
+    type: DataTypes.STRING(50),
+    allowNull: false,
+    unique: true,
+    comment: '设备ID（唯一标识）'
+  },
+  
+  deviceName: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+    comment: '设备名称'
+  },
+  
+  deviceType: {
+    type: DataTypes.STRING(50),
+    defaultValue: 'WaterDispenser',
+    allowNull: false,
+    comment: '设备类型'
+  },
+  
+  // ========== 设备认证 ==========
+  password: {
+    type: DataTypes.STRING(100),
+    allowNull: false,
+    comment: '设备密码（用于TCP认证）'
+  },
+  
+  // ========== 位置信息 ==========
+  location: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+    comment: '设备位置'
+  },
+  
+  latitude: {
+    type: DataTypes.DECIMAL(10, 8),
+    allowNull: true,
+    comment: '纬度'
+  },
+  
+  longitude: {
+    type: DataTypes.DECIMAL(11, 8),
+    allowNull: true,
+    comment: '经度'
+  },
+  
+  // ========== 设备状态 ==========
+  status: {
+    type: DataTypes.ENUM('Online', 'Offline', 'Maintenance', 'Error'),
+    defaultValue: 'Offline',
+    allowNull: false,
+    comment: '设备状态'
+  },
+  
+  isActive: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+    allowNull: false,
+    comment: '是否启用'
+  },
+  
+  // ========== 水质参数 ==========
+  tdsValue: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'TDS值（水质指标）'
+  },
+  
+  temperature: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: true,
+    comment: '水温（摄氏度）'
+  },
+  
+  // ========== 计费配置 ==========
+  pricePerLiter: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 500.00,
+    allowNull: false,
+    comment: '每升价格（印尼盾）'
+  },
+
+  pulsePerLiter: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 1.0,
+    allowNull: false,
+    comment: '每升脉冲数（用于PWM转换为升）'
+  },
+
+  // ========== 固件信息 ==========
+  firmwareVersion: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    comment: '固件版本号'
+  },
+
+  // ========== 告警信息 ==========
+  errorCodes: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+    comment: '告警代码（JSON数组）'
+  },
+  
+  // ========== 管理员信息 ==========
+  stewardId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: '管理员ID（外键）',
+    references: {
+      model: 'users',
+      key: 'id'
     },
-    locationName: {
-        type: String,
-        default: 'Unknown Location'
-    },
-    // [P3-INF-002] 地理位置索引，用于“查找附近水站”
-    location: {
-        type: {
-            type: String,
-            enum: ['Point'],
-            default: 'Point'
-        },
-        coordinates: {
-            type: [Number], // [longitude, latitude]
-            default: [106.8229, -6.1944] // 默认雅加达市中心
-        }
-    },
-    rpOwner: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-    },
-    steward: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-    },
-    status: {
-        type: String,
-        enum: ['Active', 'Locked', 'Maintenance', 'Offline'],
-        default: 'Active'
-    },
-    // 实时传感器数据 (对齐硬件文档)
-    sensors: {
-        rawTDS: { type: Number, default: 0 },   // 原水 TDS
-        pureTDS: { type: Number, default: 0 },  // 净水 TDS
-        ph: { type: Number, default: 7.0 },     // pH 值
-        temp: { type: Number, default: 25 },    // 温度
-        humidity: { type: Number, default: 50 } // 湿度
-    },
-    // 订阅状态
-    subscription: {
-        lastPaidAt: { type: Date },
-        overdueDays: { type: Number, default: 0 },
-        isOverdue: { type: Boolean, default: false }
-    },
-    // 人人水站API数据
-    price: { type: Number }, // 出水单价(分)
-    speed: { type: Number }, // 出水速度(L/min)
-    outlets: [{ // 出水口列表
-        no: { type: Number }, // 出水口号
-        price: { type: Number }, // 该出水口单价
-        speed: { type: Number } // 该出水口速度
-    }],
-    preCash: { type: Number, default: 0 }, // 预扣金额(分)
-    valid: { type: Boolean, default: true }, // 设备是否有效
-    validDate: { type: Number }, // 有效期时间戳
-    lastHeartbeat: {
-        type: Date
-    }
+    onUpdate: 'CASCADE',
+    onDelete: 'SET NULL'
+  },
+  
+  // ========== 时间戳 ==========
+  lastHeartbeatAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    comment: '最后心跳时间'
+  },
+  
+  lastMaintenanceAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    comment: '最后维护时间'
+  }
 }, {
-    timestamps: true
+  tableName: 'units',
+  timestamps: true,
+  underscored: true,
+  indexes: [
+    { fields: ['device_id'], unique: true },
+    { fields: ['status'] },
+    { fields: ['steward_id'] },
+    { fields: ['is_active'] }
+  ]
 });
 
-// [P3-INF-002] 创建地理位置索引
-unitSchema.index({ location: '2dsphere' });
-unitSchema.index({ status: 1 });
-unitSchema.index({ rpOwner: 1 });
-
-const Unit = mongoose.model('Unit', unitSchema);
-
 module.exports = Unit;
+

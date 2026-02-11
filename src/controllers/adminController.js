@@ -4,7 +4,7 @@ const Permission = require('../models/Permission');
 const hardwareService = require('../services/hardwareService');
 const renrenWaterService = require('../services/renrenWaterService');
 const websocketService = require('../services/websocketService');
-const completeDataSyncService = require('../services/completeDataSyncService');
+// const completeDataSyncService = require('../services/completeDataSyncService'); // 暂时注释，因为依赖mongoose
 
 /**
  * @desc    管理员直接创建用户 (用于添加 RP, Steward 或 内部员工)
@@ -326,14 +326,22 @@ exports.getDashboardStats = async (req, res) => {
  */
 exports.getAllUnits = async (req, res) => {
     try {
-        const units = await Unit.find().sort({ createdAt: -1 });
+        const units = await Unit.findAll({
+            order: [['createdAt', 'DESC']],
+            include: [{
+                model: User,
+                as: 'steward',
+                attributes: ['id', 'name', 'phoneNumber']
+            }]
+        });
         res.status(200).json({
             success: true,
             count: units.length,
             data: units
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Server Error' });
+        console.error('Get All Units Error:', error);
+        res.status(500).json({ success: false, message: 'Server Error', error: error.message });
     }
 };
 

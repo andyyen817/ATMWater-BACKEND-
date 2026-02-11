@@ -1,20 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const { 
-    getPartnerTree, 
-    getUnassignedStewards, 
-    bindSteward, 
-    unbindSteward 
+const {
+    getPartnerTree,
+    getUnassignedStewards,
+    bindSteward,
+    unbindSteward
 } = require('../controllers/partnerController');
-const { protect, checkPermission } = require('../middleware/authMiddleware');
+const { protect, authorize } = require('../middleware/authMiddleware');
 
-// 基于动态权限矩阵控制 (P1-WEB-001)
+// 基于角色控制
 router.use(protect);
 
-router.get('/tree', checkPermission('manage_partners'), getPartnerTree);
-router.get('/unassigned-stewards', checkPermission('manage_partners'), getUnassignedStewards);
-router.post('/bind', checkPermission('manage_partners'), bindSteward);
-router.post('/unbind', checkPermission('manage_partners'), unbindSteward);
+router.get('/tree', authorize('Admin', 'Super-Admin', 'GM', 'Business'), getPartnerTree);
+router.get('/unassigned-stewards', authorize('Admin', 'Super-Admin', 'GM', 'Business'), getUnassignedStewards);
+router.post('/bind', authorize('Admin', 'Super-Admin', 'GM', 'Business'), bindSteward);
+router.post('/unbind', authorize('Admin', 'Super-Admin', 'GM', 'Business'), unbindSteward);
 
 module.exports = router;
 

@@ -17,14 +17,14 @@ const { protect, authorize, checkPermission } = require('../middleware/authMiddl
 // 所有管理端接口都需要登录
 router.use(protect);
 
-// 1. 获取 Dashboard 统计 (需要 view_dashboard 权限)
-router.get('/dashboard-stats', checkPermission('view_dashboard'), getDashboardStats);
+// 1. 获取 Dashboard 统计 (管理员可访问)
+router.get('/dashboard-stats', authorize('Admin', 'Super-Admin', 'GM', 'Business'), getDashboardStats);
 
-// 2. 获取所有设备列表 (需要 view_dashboard 或 manage_units 权限)
-router.get('/units', checkPermission('view_dashboard'), getAllUnits);
+// 2. 获取所有设备列表 (管理员可访问)
+router.get('/units', authorize('Admin', 'Super-Admin', 'GM', 'Business', 'Steward', 'RP'), getAllUnits);
 
 // 2.1 获取单个设备详情
-router.get('/units/:id', checkPermission('view_dashboard'), getUnitDetail);
+router.get('/units/:id', authorize('Admin', 'Super-Admin', 'GM', 'Business', 'Steward', 'RP'), getUnitDetail);
 
 // 2.2 导入人人水站设备
 router.post('/units/import', authorize('Admin', 'Super-Admin', 'Business'), importRenrenDevice);

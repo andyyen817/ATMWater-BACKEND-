@@ -56,7 +56,13 @@ const sendTwilioWhatsAppOTP = async (phoneNumber, otp) => {
 
     if (!accountSid || !authToken) throw new Error('Twilio credentials missing');
 
-    const client = require('twilio')(accountSid, authToken);
+    let twilio;
+    try {
+        twilio = require('twilio');
+    } catch (error) {
+        throw new Error('Twilio module not installed. Run: npm install twilio');
+    }
+    const client = twilio(accountSid, authToken);
 
     try {
         const message = await client.messages.create({
@@ -88,7 +94,13 @@ const sendTwilioSMSOTP = async (phoneNumber, otp) => {
         throw new Error('Twilio SMS credentials (SID, Token, or FROM number) missing');
     }
 
-    const client = require('twilio')(accountSid, authToken);
+    let twilio;
+    try {
+        twilio = require('twilio');
+    } catch (error) {
+        throw new Error('Twilio module not installed. Run: npm install twilio');
+    }
+    const client = twilio(accountSid, authToken);
 
     try {
         const message = await client.messages.create({

@@ -1,6 +1,5 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
-const Permission = require('../models/Permission');
+const { User, Permission } = require('../models'); // Stage 1 修复：使用 Sequelize 模型
 
 // 1. 基础验证中间件：确保请求者已登录 (持有有效 Token)
 const protect = async (req, res, next) => {
@@ -15,7 +14,10 @@ const protect = async (req, res, next) => {
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
             // 将用户信息挂载到请求对象 req 上，供后续使用
-            req.user = await User.findById(decoded.id).select('-otp -otpExpires');
+            // 修改为 Sequelize 语法：findByPk 代替 findById
+            req.user = await User.findByPk(decoded.id, {
+                attributes: { exclude: ['otp', 'otpExpires'] }
+            });
             
             if (!req.user) {
                 return res.status(401).json({ success: false, message: 'User not found' });
@@ -64,7 +66,10 @@ const checkPermission = (functionKey) => {
         }
 
         try {
-            const permissionDoc = await Permission.findOne({ functionKey });
+            // 修改为 Sequelize 语法：findOne with where clause
+            const permissionDoc = await Permission.findOne({
+                where: { functionKey }
+            });
             
             if (!permissionDoc) {
                 // 如果权限未定义，默认拒绝（安全起见）
@@ -74,8 +79,8 @@ const checkPermission = (functionKey) => {
                 });
             }
 
-            // Mongoose Map 使用 .get()
-            const hasAccess = permissionDoc.permissions.get(req.user.role);
+            // Sequelize JSON 字段直接访问，不需要 .get()
+            const hasAccess = permissionDoc.permissions && permissionDoc.permissions[req.user.role] === true;
 
             if (!hasAccess) {
                 return res.status(403).json({ 

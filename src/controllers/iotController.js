@@ -1,12 +1,13 @@
-const Unit = require('../models/Unit');
-const User = require('../models/User');
-const Transaction = require('../models/Transaction');
-const WaterQualityLog = require('../models/WaterQualityLog'); // P2-IOT-002
-const RenrenCard = require('../models/RenrenCard');
-const RenrenTransaction = require('../models/RenrenTransaction');
+const { User, Unit, Transaction } = require('../models'); // Stage 1 修复：使用 Sequelize 模型
+// ❌ WaterQualityLog 暂时注释（非核心功能，待迁移）
+// const WaterQualityLog = require('../models/WaterQualityLog'); // P2-IOT-002
+// ❌ RenrenCard, RenrenTransaction 已删除（阶段0：清理人人水站功能）
+// const RenrenCard = require('../models/RenrenCard');
+// const RenrenTransaction = require('../models/RenrenTransaction');
 const { verifySignature } = require('../utils/signature');
 const hardwareService = require('../services/hardwareService');
-const { processProfitSharing } = require('../services/sharingService');
+// ❌ sharingService 暂时注释（依赖 Setting 模型，待迁移）
+// const { processProfitSharing } = require('../services/sharingService');
 
 /**
  * @desc    下发取水授权指令 (由 App 触发)
@@ -15,8 +16,8 @@ exports.authorizeDispense = async (req, res) => {
     try {
         const { unitId, waterType, cash } = req.body;
         const userId = req.user.id;
-        const user = await User.findById(userId);
-        const unit = await Unit.findOne({ unitId });
+        const user = await User.findByPk(userId);
+        const unit = await Unit.findOne({ where: { unitId } });
 
         if (!user || !unit) {
             return res.status(404).json({ success: false, message: 'User or Unit not found' });
@@ -38,9 +39,9 @@ exports.authorizeDispense = async (req, res) => {
         );
 
         if (!hardwareResult.success) {
-            return res.status(500).json({ 
-                success: false, 
-                message: hardwareResult.error || 'Hardware authorization failed' 
+            return res.status(500).json({
+                success: false,
+                message: hardwareResult.error || 'Hardware authorization failed'
             });
         }
 
@@ -122,11 +123,12 @@ async function handleCardWaterDispense(data) {
     console.log(`[Callback] Card Water Dispense: ${card_no} at ${device_no}, ${volume}ml, Rp ${cash}`);
 
     // 1. 更新本地卡片余额
-    const card = await RenrenCard.findOne({ cardNo: card_no });
+    const card = await RenrenCard.findOne({ where: { cardNo: card_no } });
     if (card) {
-        card.balance = end_balance;
-        card.lastSyncTime = new Date();
-        await card.save();
+        await card.update({
+            balance: end_balance,
+            lastSyncTime: new Date()
+        });
     }
 
     // 2. 保存交易记录到 RenrenTransaction
@@ -146,13 +148,12 @@ async function handleCardWaterDispense(data) {
 
     // 3. 如果卡片关联了本地用户，更新用户余额并创建本地交易
     if (card && card.localUserId) {
-        const user = await User.findById(card.localUserId);
+        const user = await User.findByPk(card.localUserId);
         if (user) {
-            user.balance = end_balance;
-            await user.save();
+            await user.update({ balance: end_balance });
 
             await Transaction.create({
-                userId: user._id,
+                userId: user.id,
                 type: 'WaterPurchase',
                 amount: cash,
                 status: 'Completed',
@@ -193,7 +194,10 @@ async function handleCardlessWaterDispense(data) {
     console.log(`[Callback] Cardless Water Dispense: ${out_trade_no}, state=${water_state}`);
 
     // 查找对应的交易记录
-    let transaction = await Transaction.findOne({ externalId: out_trade_no }).populate('userId');
+    let transaction = await Transaction.findOne({
+        where: { externalId: out_trade_no },
+        include: [{ model: User, as: 'user' }]
+    });
 
     if (water_state === 1) { // 成功出水
         // 幂等性检查
@@ -202,44 +206,47 @@ async function handleCardlessWaterDispense(data) {
             return res.status(200).send('success');
         }
 
-        const customer = transaction ? transaction.userId : await User.findOne({ phoneNumber: card_no });
-        const unit = await Unit.findOne({ unitId: device_no });
+        const customer = transaction ? transaction.user : await User.findOne({ where: { phoneNumber: card_no } });
+        const unit = await Unit.findOne({ where: { unitId: device_no } });
 
         if (customer && unit) {
             // 使用原子操作扣除余额
-            const updateResult = await User.findByIdAndUpdate(
-                customer._id,
-                { $inc: { balance: -cash } },
-                { new: true }
+            const [affectedRows, [updateResult]] = await User.update(
+                { balance: User.sequelize.literal(`balance - ${cash}`) },
+                {
+                    where: { id: customer.id },
+                    returning: true
+                }
             );
 
             if (!updateResult || updateResult.balance < 0) {
                 console.error(`[Callback] Insufficient balance for ${customer.phoneNumber}`);
                 if (transaction) {
-                    transaction.status = 'Failed';
-                    transaction.errorMessage = 'Insufficient balance';
-                    await transaction.save();
+                    await transaction.update({
+                        status: 'Failed',
+                        errorMessage: 'Insufficient balance'
+                    });
                 }
                 return;
             }
 
             // 更新交易状态
             if (transaction) {
-                transaction.status = 'Completed';
-                transaction.volume = volume;
-                await transaction.save();
+                await transaction.update({
+                    status: 'Completed',
+                    volume: volume
+                });
             }
 
             // 触发分润
-            await processProfitSharing(out_trade_no, cash, device_no, customer._id);
+            await processProfitSharing(out_trade_no, cash, device_no, customer.id);
 
             console.log(`[Callback] Unit ${device_no} dispensed ${volume}ml. User ${customer.phoneNumber} charged Rp ${cash}`);
         }
     } else {
         // 出水失败
         if (transaction) {
-            transaction.status = 'Failed';
-            await transaction.save();
+            await transaction.update({ status: 'Failed' });
         }
         console.warn(`[Callback] Order ${out_trade_no} failed`);
     }
@@ -260,30 +267,34 @@ async function handleEcardWaterDispense(data) {
 
     if (outTradeNo && outTradeNo.startsWith('MAXBAL_')) {
         maxBalanceTransaction = await RenrenTransaction.findOne({
-            outTradeNo: outTradeNo,
-            isMaxBalanceMode: true
+            where: {
+                outTradeNo: outTradeNo,
+                isMaxBalanceMode: true
+            }
         });
     }
 
     // 1. 查找电子卡对应的用户（可能带国家码）
+    const { Op } = require('sequelize');
     const user = await User.findOne({
-        phoneNumber: {
-            $in: [
-                card_no,
-                '+86' + card_no.substring(1),
-                '+62' + card_no.substring(1)
-            ]
+        where: {
+            phoneNumber: {
+                [Op.in]: [
+                    card_no,
+                    '+86' + card_no.substring(1),
+                    '+62' + card_no.substring(1)
+                ]
+            }
         }
     });
 
     if (user) {
         // 更新用户余额
-        user.balance = end_balance;
-        await user.save();
+        await user.update({ balance: end_balance });
 
         // 创建本地交易记录（最大余额模式只记录实际消费）
         await Transaction.create({
-            userId: user._id,
+            userId: user.id,
             type: 'WaterPurchase',
             amount: cash,
             status: water_state === 1 ? 'Completed' : 'Failed',
@@ -323,14 +334,15 @@ async function handleEcardWaterDispense(data) {
         });
 
         // 更新原始交易记录
-        maxBalanceTransaction.waterState = water_state;
-        maxBalanceTransaction.endBalance = end_balance;
-        maxBalanceTransaction.actualAmount = actualAmount;
-        maxBalanceTransaction.refundAmount = refundAmount;
-        maxBalanceTransaction.volume = volume;
-        maxBalanceTransaction.price = price;
-        maxBalanceTransaction.syncStatus = water_state === 1 ? 1 : 0; // 1-成功 0-失败
-        await maxBalanceTransaction.save();
+        await maxBalanceTransaction.update({
+            waterState: water_state,
+            endBalance: end_balance,
+            actualAmount: actualAmount,
+            refundAmount: refundAmount,
+            volume: volume,
+            price: price,
+            syncStatus: water_state === 1 ? 1 : 0 // 1-成功 0-失败
+        });
 
         // 如果有差额需要退款且出水成功
         if (refundAmount > 0 && water_state === 1) {
@@ -341,8 +353,7 @@ async function handleEcardWaterDispense(data) {
                 console.log(`[Callback] Processing refund: ${refundAmount} cents`);
 
                 // 更新交易状态为处理中
-                maxBalanceTransaction.refundStatus = 'processing';
-                await maxBalanceTransaction.save();
+                await maxBalanceTransaction.update({ refundStatus: 'processing' });
 
                 // 退款重试机制（最多3次）
                 let refundResult = null;
@@ -368,11 +379,12 @@ async function handleEcardWaterDispense(data) {
                             console.log(`[Callback] Refund successful: ${refundAmount} cents`);
 
                             // 更新交易状态为成功
-                            maxBalanceTransaction.refundStatus = 'success';
-                            maxBalanceTransaction.refundTradeNo = refundResult.result?.trade_no || '';
-                            maxBalanceTransaction.refundTime = new Date();
-                            maxBalanceTransaction.refundRetryCount = attempt;
-                            await maxBalanceTransaction.save();
+                            await maxBalanceTransaction.update({
+                                refundStatus: 'success',
+                                refundTradeNo: refundResult.result?.trade_no || '',
+                                refundTime: new Date(),
+                                refundRetryCount: attempt
+                            });
 
                             // 等待1秒让人人水站处理完毕
                             await new Promise(resolve => setTimeout(resolve, 1000));
@@ -393,13 +405,11 @@ async function handleEcardWaterDispense(data) {
 
                                         // 更新用户余额
                                         if (user) {
-                                            user.balance = newBalance;
-                                            await user.save();
+                                            await user.update({ balance: newBalance });
                                         }
 
                                         // 更新退款后的余额
-                                        maxBalanceTransaction.balanceAfterRefund = newBalance;
-                                        await maxBalanceTransaction.save();
+                                        await maxBalanceTransaction.update({ balanceAfterRefund: newBalance });
 
                                         break;
                                     }
@@ -413,8 +423,7 @@ async function handleEcardWaterDispense(data) {
 
                             if (!syncSuccess) {
                                 console.error(`[Callback] Balance sync failed after 3 attempts`);
-                                maxBalanceTransaction.refundError = 'Balance sync failed after refund';
-                                await maxBalanceTransaction.save();
+                                await maxBalanceTransaction.update({ refundError: 'Balance sync failed after refund' });
                             }
 
                             // 创建退款交易记录
@@ -445,15 +454,16 @@ async function handleEcardWaterDispense(data) {
                                 refundStatus: 'success',
                                 refundRetryCount: attempt,
 
-                                localUserId: user?._id
+                                localUserId: user?.id
                             });
 
                             break; // 退款成功，退出重试循环
                         } else {
                             console.warn(`[Callback] Refund attempt ${attempt} failed:`, refundResult);
-                            maxBalanceTransaction.refundError = `Attempt ${attempt}: ${refundResult.error || 'Unknown error'}`;
-                            maxBalanceTransaction.refundRetryCount = attempt;
-                            await maxBalanceTransaction.save();
+                            await maxBalanceTransaction.update({
+                                refundError: `Attempt ${attempt}: ${refundResult.error || 'Unknown error'}`,
+                                refundRetryCount: attempt
+                            });
 
                             if (attempt < MAX_REFUND_RETRIES) {
                                 await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // 递增延迟
@@ -461,9 +471,10 @@ async function handleEcardWaterDispense(data) {
                         }
                     } catch (retryError) {
                         console.error(`[Callback] Refund attempt ${attempt} exception:`, retryError.message);
-                        maxBalanceTransaction.refundError = `Attempt ${attempt}: ${retryError.message}`;
-                        maxBalanceTransaction.refundRetryCount = attempt;
-                        await maxBalanceTransaction.save();
+                        await maxBalanceTransaction.update({
+                            refundError: `Attempt ${attempt}: ${retryError.message}`,
+                            refundRetryCount: attempt
+                        });
 
                         if (attempt < MAX_REFUND_RETRIES) {
                             await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // 递增延迟
@@ -474,22 +485,25 @@ async function handleEcardWaterDispense(data) {
                 // 如果所有重试都失败
                 if (!refundSuccess) {
                     console.error(`[Callback] Refund failed after ${MAX_REFUND_RETRIES} attempts`);
-                    maxBalanceTransaction.refundStatus = 'failed';
-                    maxBalanceTransaction.refundError = `Failed after ${MAX_REFUND_RETRIES} attempts`;
-                    await maxBalanceTransaction.save();
+                    await maxBalanceTransaction.update({
+                        refundStatus: 'failed',
+                        refundError: `Failed after ${MAX_REFUND_RETRIES} attempts`
+                    });
                 }
 
             } catch (error) {
                 console.error(`[Callback] Refund process error:`, error.message);
-                maxBalanceTransaction.refundStatus = 'failed';
-                maxBalanceTransaction.refundError = error.message;
-                await maxBalanceTransaction.save();
+                await maxBalanceTransaction.update({
+                    refundStatus: 'failed',
+                    refundError: error.message
+                });
             }
         } else if (water_state === 1) {
             // 出水成功但无差额需要退款
-            maxBalanceTransaction.refundStatus = 'success';
-            maxBalanceTransaction.refundTime = new Date();
-            await maxBalanceTransaction.save();
+            await maxBalanceTransaction.update({
+                refundStatus: 'success',
+                refundTime: new Date()
+            });
         }
 
         // 添加最大余额模式标记到交易数据
@@ -522,14 +536,13 @@ exports.handleStatusPush = async (req, res) => {
         // 2. 数据类型 12: 设备最新状态推送
         if (data.data_type === 12) {
             const { device_no, pure_tds, raw_tds, temperature, humidity, power_status, sale_status } = data;
-            
+
             // 模拟 pH 值逻辑 (PRD 要求但硬件当前未上报，我们暂设随机波动以供前端展示曲线)
             const mockPH = (6.8 + Math.random() * 0.8).toFixed(2);
 
             // A. 更新 Unit 实时快照
-            const currentUnit = await Unit.findOneAndUpdate(
-                { unitId: device_no },
-                { 
+            const [affectedRows, [currentUnit]] = await Unit.update(
+                {
                     'sensors.rawTDS': raw_tds,
                     'sensors.pureTDS': pure_tds,
                     'sensors.temp': temperature,
@@ -538,7 +551,10 @@ exports.handleStatusPush = async (req, res) => {
                     status: power_status === 1 ? (sale_status === 1 ? 'Active' : 'Maintenance') : 'Locked',
                     lastHeartbeat: Date.now()
                 },
-                { new: true }
+                {
+                    where: { unitId: device_no },
+                    returning: true
+                }
             );
 
             // [P2-API-006] 自动调价逻辑：TDS 异常时触发预警
@@ -548,9 +564,9 @@ exports.handleStatusPush = async (req, res) => {
             }
 
             // B. 归档历史记录 (用于 App 水质曲线图)
-            const unitDoc = await Unit.findOne({ unitId: device_no });
+            const unitDoc = await Unit.findOne({ where: { unitId: device_no } });
             await WaterQualityLog.create({
-                unitId: unitDoc ? unitDoc._id : null,
+                unitId: unitDoc ? unitDoc.id : null,
                 deviceSerial: device_no,
                 pureTDS: pure_tds,
                 rawTDS: raw_tds,
@@ -580,18 +596,21 @@ exports.getNearbyUnits = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Coordinates required' });
         }
 
-        const units = await Unit.find({
-            location: {
-                $near: {
-                    $geometry: {
-                        type: 'Point',
-                        coordinates: [parseFloat(lng), parseFloat(lat)]
-                    },
-                    $maxDistance: parseInt(distance)
-                }
+        const { Op, fn, col, literal } = require('sequelize');
+
+        // Sequelize geospatial query using ST_Distance_Sphere
+        const units = await Unit.findAll({
+            where: {
+                status: 'Active', // 仅显示营业中的
+                [Op.and]: literal(
+                    `ST_Distance_Sphere(location, ST_GeomFromText('POINT(${parseFloat(lng)} ${parseFloat(lat)})')) <= ${parseInt(distance)}`
+                )
             },
-            status: 'Active' // 仅显示营业中的
-        }).limit(10);
+            order: literal(
+                `ST_Distance_Sphere(location, ST_GeomFromText('POINT(${parseFloat(lng)} ${parseFloat(lat)})'))`
+            ),
+            limit: 10
+        });
 
         res.status(200).json({ success: true, data: units });
     } catch (error) {
@@ -606,7 +625,7 @@ exports.getNearbyUnits = async (req, res) => {
  */
 exports.getUnitDetail = async (req, res) => {
     try {
-        const unit = await Unit.findOne({ unitId: req.params.id });
+        const unit = await Unit.findOne({ where: { unitId: req.params.id } });
         if (!unit) {
             return res.status(404).json({ success: false, message: 'Station not found' });
         }
@@ -622,9 +641,11 @@ exports.getUnitDetail = async (req, res) => {
  */
 exports.getWaterQualityHistory = async (req, res) => {
     try {
-        const logs = await WaterQualityLog.find({ deviceSerial: req.params.id })
-            .sort({ createdAt: -1 })
-            .limit(7);
+        const logs = await WaterQualityLog.findAll({
+            where: { deviceSerial: req.params.id },
+            order: [['createdAt', 'DESC']],
+            limit: 7
+        });
 
         // 格式化为前端图表所需格式
         const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -643,8 +664,8 @@ exports.getWaterQualityHistory = async (req, res) => {
             offset: (log.ph - 7) * 20 // 模拟偏移量
         }));
 
-        res.status(200).json({ 
-            success: true, 
+        res.status(200).json({
+            success: true,
             data: {
                 tdsHistory,
                 phHistory,
@@ -653,7 +674,7 @@ exports.getWaterQualityHistory = async (req, res) => {
                     max: Math.max(...logs.map(l => l.pureTDS)),
                     avg: Math.round(logs.reduce((acc, l) => acc + l.pureTDS, 0) / logs.length)
                 }
-            } 
+            }
         });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server Error' });

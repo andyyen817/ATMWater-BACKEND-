@@ -2,10 +2,11 @@
 // 统一导出所有模型并建立关联关系
 
 const sequelize = require('../config/database');
-const User = require('./User.mysql');
-const PhysicalCard = require('./PhysicalCard.mysql');
-const Unit = require('./Unit.mysql');
-const Transaction = require('./Transaction.mysql');
+const User = require('./User');
+const PhysicalCard = require('./PhysicalCard');
+const Unit = require('./Unit');
+const Transaction = require('./Transaction');
+const Permission = require('./Permission'); // Stage 1 添加：权限模型
 
 // ========================================
 // 建立模型关联关系
@@ -73,6 +74,7 @@ module.exports = {
   PhysicalCard,
   Unit,
   Transaction,
+  Permission, // Stage 1 添加：权限模型
   syncDatabase
 };
 

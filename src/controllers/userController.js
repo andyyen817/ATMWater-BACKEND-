@@ -1,7 +1,9 @@
-const User = require('../models/User');
-const Transaction = require('../models/Transaction');
-const RenrenCard = require('../models/RenrenCard');
-const renrenWaterService = require('../services/renrenWaterService');
+const { User, Transaction } = require('../models'); // Stage 1 修复：使用 Sequelize 模型
+// ❌ RenrenCard 已删除（阶段0：清理人人水站功能）
+// const RenrenCard = require('../models/RenrenCard');
+// ❌ renrenWaterService 已删除（阶段0：清理人人水站功能）
+// const renrenWaterService = require('../services/renrenWaterService');
+const { Op } = require('sequelize');
 
 /**
  * @desc    获取用户的卡片列表（含余额）
@@ -10,7 +12,7 @@ const renrenWaterService = require('../services/renrenWaterService');
 exports.getUserCards = async (req, res) => {
     try {
         // 查找与当前用户关联的所有卡片
-        const cards = await RenrenCard.find({ localUserId: req.user.id });
+        const cards = await RenrenCard.findAll({ where: { localUserId: req.user.id } });
 
         // 实时从人人水站同步卡片余额
         const cardsWithBalance = await Promise.all(cards.map(async (card) => {
@@ -70,7 +72,7 @@ exports.getCardTransactions = async (req, res) => {
         const { page = 1, size = 20 } = req.query;
 
         // 验证卡片是否属于当前用户
-        const card = await RenrenCard.findOne({ cardNo, localUserId: req.user.id });
+        const card = await RenrenCard.findOne({ where: { cardNo, localUserId: req.user.id } });
 
         if (!card) {
             return res.status(404).json({ success: false, message: 'Card not found' });
@@ -114,13 +116,16 @@ exports.getCardTransactions = async (req, res) => {
  */
 exports.getUserHistory = async (req, res) => {
     try {
-        const history = await Transaction.find({ 
-            userId: req.user.id,
-            type: { $in: ['Water-Purchase', 'Dispense'] } 
-        }).sort({ createdAt: -1 });
+        const history = await Transaction.findAll({
+            where: {
+                userId: req.user.id,
+                type: { [Op.in]: ['Water-Purchase', 'Dispense'] }
+            },
+            order: [['createdAt', 'DESC']]
+        });
 
         const formattedHistory = history.map(item => ({
-            id: item._id,
+            id: item.id,
             date: item.createdAt,
             unitName: item.metadata?.unitName || 'Water Station',
             volume: item.metadata?.volume || 0,
@@ -140,7 +145,9 @@ exports.getUserHistory = async (req, res) => {
  */
 exports.getProfile = async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('-otp -otpExpires +password');
+        const user = await User.findByPk(req.user.id, {
+            attributes: { exclude: ['otp', 'otpExpires'] }
+        });
         res.status(200).json({ success: true, data: user });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server Error' });
@@ -154,15 +161,22 @@ exports.getProfile = async (req, res) => {
 exports.updateProfile = async (req, res) => {
     try {
         const { name, email } = req.body;
-        const user = await User.findByIdAndUpdate(
-            req.user.id,
-            { name, email },
-            { new: true, runValidators: true }
-        ).select('-otp -otpExpires');
+        const user = await User.findByPk(req.user.id);
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        await user.update({ name, email });
+
+        // Reload to exclude sensitive fields
+        const updatedUser = await User.findByPk(req.user.id, {
+            attributes: { exclude: ['otp', 'otpExpires'] }
+        });
 
         res.status(200).json({
             success: true,
-            data: user
+            data: updatedUser
         });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server Error' });
@@ -175,12 +189,12 @@ exports.updateProfile = async (req, res) => {
  */
 exports.addBankAccount = async (req, res) => {
     try {
-        const user = await User.findById(req.user.id);
+        const user = await User.findByPk(req.user.id);
         const { bankName, accountNumber, accountHolder } = req.body;
 
         // 如果是第一张卡，设为默认
         const isDefault = user.bankAccounts.length === 0;
-        
+
         user.bankAccounts.push({ bankName, accountNumber, accountHolder, isDefault });
         await user.save();
 
@@ -196,11 +210,11 @@ exports.addBankAccount = async (req, res) => {
  */
 exports.addAddress = async (req, res) => {
     try {
-        const user = await User.findById(req.user.id);
+        const user = await User.findByPk(req.user.id);
         const { label, receiverName, receiverPhone, fullAddress } = req.body;
 
         const isDefault = user.shippingAddresses.length === 0;
-        
+
         user.shippingAddresses.push({ label, receiverName, receiverPhone, fullAddress, isDefault });
         await user.save();
 
@@ -216,8 +230,8 @@ exports.addAddress = async (req, res) => {
  */
 exports.deleteBankAccount = async (req, res) => {
     try {
-        const user = await User.findById(req.user.id);
-        user.bankAccounts = user.bankAccounts.filter(acc => acc._id.toString() !== req.params.id);
+        const user = await User.findByPk(req.user.id);
+        user.bankAccounts = user.bankAccounts.filter(acc => acc.id.toString() !== req.params.id);
         await user.save();
         res.status(200).json({ success: true, data: user.bankAccounts });
     } catch (error) {
@@ -231,8 +245,8 @@ exports.deleteBankAccount = async (req, res) => {
  */
 exports.deleteAddress = async (req, res) => {
     try {
-        const user = await User.findById(req.user.id);
-        user.shippingAddresses = user.shippingAddresses.filter(addr => addr._id.toString() !== req.params.id);
+        const user = await User.findByPk(req.user.id);
+        user.shippingAddresses = user.shippingAddresses.filter(addr => addr.id.toString() !== req.params.id);
         await user.save();
         res.status(200).json({ success: true, data: user.shippingAddresses });
     } catch (error) {

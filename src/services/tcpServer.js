@@ -41,9 +41,10 @@ const server = net.createServer((socket) => {
   const clientId = `${socket.remoteAddress}:${socket.remotePort}`;
   log(`[TCP] 🔌 New connection: ${clientId}`);
 
-  // 第1步：连接云平台 - 发送CONNECT OK（协议要求）
-  socket.write('CONNECT OK\n');
-  log(`[TCP] ⬅️ [SERVER→HARDWARE] Sent: CONNECT OK`);
+  // 第1步：连接云平台 - 等待设备发送GT命令
+  // 根据协议流程：设备连接 → 设备发GT → 服务器回GT响应
+  // 不主动发送CONNECT OK
+  log(`[TCP] ⏳ Waiting for GT command from device...`);
 
   let deviceId = null;
   let buffer = '';

@@ -1,4 +1,4 @@
-const User = require('../models/User');
+const { User } = require('../models'); // Stage 1 修复：使用 Sequelize 模型
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
@@ -23,7 +23,7 @@ exports.setPassword = async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        await User.findByIdAndUpdate(req.user.id, { password: hashedPassword });
+        await User.update({ password: hashedPassword }, { where: { id: req.user.id } });
 
         res.status(200).json({ success: true, message: 'Password set successfully' });
     } catch (error) {
@@ -40,7 +40,7 @@ exports.loginWithPassword = async (req, res) => {
     try {
         const { phoneNumber, password } = req.body;
         console.log('[Login] Looking for phone:', phoneNumber);
-        const user = await User.findOne({ phoneNumber }).select('+password');
+        const user = await User.findOne({ where: { phoneNumber } });
         console.log('[Login] User found:', user ? 'YES' : 'NO');
         if (user) {
             console.log('[Login] Has password:', user.password ? 'YES' : 'NO');
@@ -59,12 +59,12 @@ exports.loginWithPassword = async (req, res) => {
             return res.status(401).json({ success: false, message: 'Invalid credentials' });
         }
 
-        const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '30d' });
+        const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '30d' });
 
         res.status(200).json({
             success: true,
             token,
-            user: { id: user._id, phoneNumber: user.phoneNumber, role: user.role, name: user.name }
+            user: { id: user.id, phoneNumber: user.phoneNumber, role: user.role, name: user.name }
         });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server Error' });
@@ -84,24 +84,24 @@ exports.requestOTP = async (req, res) => {
         const otp = Math.floor(1000 + Math.random() * 9000).toString();
         const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
 
-        let user = await User.findOne({ phoneNumber });
-        
+        let user = await User.findOne({ where: { phoneNumber } });
+
         if (!user) {
             // 新用户注册
-            user = new User({ 
-                phoneNumber, 
-                referralCode: generateReferralCode() 
+            user = await User.create({
+                phoneNumber,
+                referralCode: generateReferralCode()
             });
 
             // 处理推荐关系
             if (referrerCode) {
-                const referrer = await User.findOne({ referralCode: referrerCode.toUpperCase() });
+                const referrer = await User.findOne({ where: { referralCode: referrerCode.toUpperCase() } });
                 if (referrer) {
-                    user.managedBy = referrer._id;
+                    user.managedBy = referrer.id;
                     console.log(`[Referral] New user ${phoneNumber} referred by ${referrer.phoneNumber}`);
+                    await user.save();
                 }
             }
-            await user.save();
         }
 
         user.otp = otp;
@@ -135,7 +135,7 @@ exports.verifyOTP = async (req, res) => {
         }
 
         // 1. 查找用户
-        const user = await User.findOne({ phoneNumber });
+        const user = await User.findOne({ where: { phoneNumber } });
 
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
@@ -154,7 +154,7 @@ exports.verifyOTP = async (req, res) => {
 
         // 4. 生成 JWT Token
         const token = jwt.sign(
-            { id: user._id, role: user.role },
+            { id: user.id, role: user.role },
             process.env.JWT_SECRET,
             { expiresIn: '30d' }
         );
@@ -163,7 +163,7 @@ exports.verifyOTP = async (req, res) => {
             success: true,
             token,
             user: {
-                id: user._id,
+                id: user.id,
                 phoneNumber: user.phoneNumber,
                 role: user.role,
                 name: user.name,
