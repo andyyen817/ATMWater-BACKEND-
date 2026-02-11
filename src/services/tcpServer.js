@@ -100,7 +100,8 @@ const server = net.createServer((socket) => {
               const response = await handleCommand(cmd, socket);
 
               if (response) {
-                const responseStr = JSON.stringify(response) + '\n';
+                // 使用\r\n作为行尾符（与GPRS模块格式一致）
+                const responseStr = JSON.stringify(response) + '\r\n';
                 socket.write(responseStr);
                 log(`[TCP] ⬅️ [SERVER→HARDWARE] Sending response:`, response);
                 log(`[TCP] ⬅️ [SERVER→HARDWARE] Raw JSON sent:`, JSON.stringify(responseStr));
