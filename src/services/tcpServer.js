@@ -41,10 +41,9 @@ const server = net.createServer((socket) => {
   const clientId = `${socket.remoteAddress}:${socket.remotePort}`;
   log(`[TCP] 🔌 New connection: ${clientId}`);
 
-  // 不主动发送CONNECT OK，等待设备发送第一个命令
-  // CONNECT OK是GPRS模块格式，可能导致设备混淆
-  // 让设备通过TCP连接成功来判断，直接发送AU认证
-  log(`[TCP] ⏳ Waiting for device to send AU command...`);
+  // 第1步：连接云平台 - 发送CONNECT OK（协议要求）
+  socket.write('CONNECT OK\n');
+  log(`[TCP] ⬅️ [SERVER→HARDWARE] Sent: CONNECT OK`);
 
   let deviceId = null;
   let buffer = '';
@@ -196,19 +195,16 @@ async function handleCommand(cmd, socket) {
 }
 
 // ========================================
-// GT - GPRS测试/初始化
+// GT - GPRS测试/初始化（第2步）
 // ========================================
-async function handleGPRSTest(cmd, socket) {
+async function handleGPRSTest(cmd) {
   const { DId } = cmd;
 
   log(`[TCP] 📡 GPRS test from device: ${DId}`);
 
-  // 尝试：在GT响应后发送CONNECT OK
-  // 可能设备期望在GT之后才收到CONNECT OK
-  socket.write('CONNECT OK\n');
-  log(`[TCP] ⬅️ [SERVER→HARDWARE] Sent: CONNECT OK (after GT)`);
-
-  // 然后返回GT的JSON响应
+  // 第2步：GT命令 - 遵循"一问一答原则"
+  // 设备发送GT → 服务器只返回GT的JSON响应
+  // 不需要额外发送CONNECT OK或其他内容
   return {
     Cmd: 'GT',
     DId: DId,
