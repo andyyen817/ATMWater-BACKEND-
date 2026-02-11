@@ -196,10 +196,12 @@ async function handleGPRSTest(cmd, socket) {
 
   log(`[TCP] 📡 GPRS test from device: ${DId}`);
 
-  // 方案2：GT命令不返回JSON响应，避免混淆设备
-  // 设备已经在连接时收到了"CONNECT OK"，这里不需要再返回响应
-  log(`[TCP] 📡 GT command received, no JSON response sent (device already got CONNECT OK)`);
-  return null; // 不返回响应
+  // GPRS模块需要GT命令的响应来确认连接
+  // 发送简单的"OK"响应，而不是JSON格式
+  socket.write('OK\n');
+  log(`[TCP] 📡 GT response sent: OK`);
+
+  return null; // 不通过handleCommand返回JSON响应
 }
 
 // ========================================
