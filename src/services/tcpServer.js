@@ -12,15 +12,38 @@ const TCP_PORT = process.env.TCP_PORT || 55036;
 const HEARTBEAT_TIMEOUT = 180000; // 180秒超时 (硬件心跳间隔90秒 + 90秒容错)
 
 // ========================================
+// 时间戳工具函数
+// ========================================
+function getTimestamp() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  const ms = String(now.getMilliseconds()).padStart(3, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${ms}`;
+}
+
+function log(...args) {
+  console.log(`[${getTimestamp()}]`, ...args);
+}
+
+function logError(...args) {
+  console.error(`[${getTimestamp()}]`, ...args);
+}
+
+// ========================================
 // TCP 服务器
 // ========================================
 const server = net.createServer((socket) => {
   const clientId = `${socket.remoteAddress}:${socket.remotePort}`;
-  console.log(`[TCP] 🔌 New connection: ${clientId}`);
+  log(`[TCP] 🔌 New connection: ${clientId}`);
 
-  // 注释掉CONNECT OK，因为旧服务器可能不发送这个
-  // socket.write('CONNECT OK\n');
-  // console.log(`[TCP] ⬅️ [SERVER→HARDWARE] Sent: CONNECT OK`);
+  // 方案1：发送CONNECT OK（符合原始印尼协议）
+  socket.write('CONNECT OK\n');
+  log(`[TCP] ⬅️ [SERVER→HARDWARE] Sent: CONNECT OK`);
 
   let deviceId = null;
   let buffer = '';
@@ -30,7 +53,7 @@ const server = net.createServer((socket) => {
   const resetHeartbeat = () => {
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
     heartbeatTimer = setTimeout(() => {
-      console.log(`[TCP] ⏰ Heartbeat timeout: ${deviceId || clientId}`);
+      log(`[TCP] ⏰ Heartbeat timeout: ${deviceId || clientId}`);
       socket.end();
     }, HEARTBEAT_TIMEOUT);
   };
@@ -52,8 +75,8 @@ const server = net.createServer((socket) => {
 
       try {
         // 记录原始数据（用于调试）
-        console.log(`[TCP] ➡️ [HARDWARE→SERVER] Received raw:`, JSON.stringify(message));
-        console.log(`[TCP] 📏 Data length: ${message.length}, First 100 chars:`, message.substring(0, 100));
+        log(`[TCP] ➡️ [HARDWARE→SERVER] Received raw:`, JSON.stringify(message));
+        log(`[TCP] 📏 Data length: ${message.length}, First 100 chars:`, message.substring(0, 100));
 
         // 清理数据：移除所有控制字符
         let cleanMessage = message.replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim();
@@ -64,21 +87,21 @@ const server = net.createServer((socket) => {
         const jsonMatch = cleanMessage.match(/^(\{[^}]*\})/);
         if (jsonMatch) {
           cleanMessage = jsonMatch[1];
-          console.log(`[TCP] 🧹 Extracted JSON:`, cleanMessage);
+          log(`[TCP] 🧹 Extracted JSON:`, cleanMessage);
         } else {
-          console.log(`[TCP] 🧹 Cleaned data:`, JSON.stringify(cleanMessage));
+          log(`[TCP] 🧹 Cleaned data:`, JSON.stringify(cleanMessage));
         }
 
         const cmd = JSON.parse(cleanMessage);
-        console.log(`[TCP] ➡️ [HARDWARE→SERVER] Parsed command:`, cmd);
+        log(`[TCP] ➡️ [HARDWARE→SERVER] Parsed command:`, cmd);
 
         const response = await handleCommand(cmd, socket);
 
         if (response) {
           const responseStr = JSON.stringify(response) + '\n';
           socket.write(responseStr);
-          console.log(`[TCP] ⬅️ [SERVER→HARDWARE] Sending response:`, response);
-          console.log(`[TCP] ⬅️ [SERVER→HARDWARE] Raw JSON sent:`, JSON.stringify(responseStr));
+          log(`[TCP] ⬅️ [SERVER→HARDWARE] Sending response:`, response);
+          log(`[TCP] ⬅️ [SERVER→HARDWARE] Raw JSON sent:`, JSON.stringify(responseStr));
         }
 
         // 更新设备ID
@@ -91,8 +114,8 @@ const server = net.createServer((socket) => {
         resetHeartbeat();
 
       } catch (error) {
-        console.error(`[TCP] ❌ Parse error:`, error.message);
-        console.error(`[TCP] ❌ Failed message:`, JSON.stringify(message));
+        logError(`[TCP] ❌ Parse error:`, error.message);
+        logError(`[TCP] ❌ Failed message:`, JSON.stringify(message));
         socket.write(JSON.stringify({
           Cmd: 'ER',
           Msg: 'Invalid JSON format'
@@ -105,19 +128,19 @@ const server = net.createServer((socket) => {
   // 连接关闭
   // ========================================
   socket.on('close', () => {
-    console.log(`[TCP] 🔌 Connection closed: ${deviceId || clientId}`);
+    log(`[TCP] 🔌 Connection closed: ${deviceId || clientId}`);
     if (deviceId) {
       deviceConnections.delete(deviceId);
       updateDeviceStatus(deviceId, 'Offline');
     }
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
   });
-  
+
   // ========================================
   // 错误处理
   // ========================================
   socket.on('error', (error) => {
-    console.error(`[TCP] ❌ Socket error (${deviceId || clientId}):`, error.message);
+    logError(`[TCP] ❌ Socket error (${deviceId || clientId}):`, error.message);
   });
 });
 
@@ -129,7 +152,7 @@ async function handleCommand(cmd, socket) {
 
   switch (Cmd) {
     case 'GT': // GPRS测试/初始化（硬件启动时发送）
-      return await handleGPRSTest(cmd);
+      return await handleGPRSTest(cmd, socket);
 
     case 'AU': // 设备认证
       return await handleAuth(cmd);
@@ -160,7 +183,7 @@ async function handleCommand(cmd, socket) {
 
     default:
       // 对不认识的命令返回 {ok}
-      console.log(`[TCP] ⚠️ Unknown command: ${Cmd}, responding with {ok}`);
+      log(`[TCP] ⚠️ Unknown command: ${Cmd}, responding with {ok}`);
       return { ok: true };
   }
 }
@@ -168,18 +191,15 @@ async function handleCommand(cmd, socket) {
 // ========================================
 // GT - GPRS测试/初始化
 // ========================================
-async function handleGPRSTest(cmd) {
+async function handleGPRSTest(cmd, socket) {
   const { DId } = cmd;
 
-  console.log(`[TCP] 📡 GPRS test from device: ${DId}`);
+  log(`[TCP] 📡 GPRS test from device: ${DId}`);
 
-  // 按照硬件工程师最新确认：Type应该是"PDF321"
-  return {
-    Cmd: 'GT',
-    DId: DId,
-    PTW: '',
-    Type: 'PDF321'
-  };
+  // 方案2：GT命令不返回JSON响应，避免混淆设备
+  // 设备已经在连接时收到了"CONNECT OK"，这里不需要再返回响应
+  log(`[TCP] 📡 GT command received, no JSON response sent (device already got CONNECT OK)`);
+  return null; // 不返回响应
 }
 
 // ========================================
@@ -216,7 +236,7 @@ async function handleAuth(cmd) {
       firmwareVersion: Ver || null
     });
 
-    console.log(`[TCP] ✅ Device authenticated: ${DId}, Version: ${Ver || 'Unknown'}`);
+    log(`[TCP] ✅ Device authenticated: ${DId}, Version: ${Ver || 'Unknown'}`);
 
     // 返回服务器时间戳（硬件协议格式）
     return {
@@ -225,7 +245,7 @@ async function handleAuth(cmd) {
     };
 
   } catch (error) {
-    console.error('[TCP] Auth error:', error.message);
+    logError('[TCP] Auth error:', error.message);
     return {
       Cmd: 'AU',
       Result: 'Fail',
@@ -250,7 +270,7 @@ async function handleHeartbeat(cmd) {
     if (Errs && Array.isArray(Errs) && Errs.length > 0) {
       updateData.status = 'Error';
       updateData.errorCodes = JSON.stringify(Errs);
-      console.log(`[TCP] ⚠️ Device errors: ${DId}`, Errs);
+      log(`[TCP] ⚠️ Device errors: ${DId}`, Errs);
     } else {
       // 清除告警信息
       updateData.errorCodes = null;
@@ -265,7 +285,7 @@ async function handleHeartbeat(cmd) {
     };
 
   } catch (error) {
-    console.error('[TCP] Heartbeat error:', error.message);
+    logError('[TCP] Heartbeat error:', error.message);
     return null; // 心跳失败不返回错误
   }
 }
@@ -351,7 +371,7 @@ async function handleSwipeWater(cmd) {
       completedAt: new Date()
     });
 
-    console.log(`[TCP] ✅ Water dispensed: ${volume}L, User: ${user.phone}, Amount: ${amount}`);
+    log(`[TCP] ✅ Water dispensed: ${volume}L, User: ${user.phone}, Amount: ${amount}`);
 
     return {
       Cmd: 'SW',
@@ -362,7 +382,7 @@ async function handleSwipeWater(cmd) {
     };
 
   } catch (error) {
-    console.error('[TCP] Swipe water error:', error.message);
+    logError('[TCP] Swipe water error:', error.message);
     return {
       Cmd: 'SW',
       Result: 'Fail',
@@ -394,7 +414,7 @@ async function handleDeviceStatus(cmd) {
     };
 
   } catch (error) {
-    console.error('[TCP] Device status error:', error.message);
+    logError('[TCP] Device status error:', error.message);
     return null;
   }
 }
@@ -421,7 +441,7 @@ async function handleWaterQuality(cmd) {
     };
 
   } catch (error) {
-    console.error('[TCP] Water quality error:', error.message);
+    logError('[TCP] Water quality error:', error.message);
     return null;
   }
 }
@@ -521,7 +541,7 @@ async function handleWaterRecord(cmd) {
       lastHeartbeatAt: new Date()
     });
 
-    console.log(`[TCP] ✅ Water record: ${volume.toFixed(2)}L, User: ${user.phone}, Amount: ${amount}, Balance: ${balanceAfter}`);
+    log(`[TCP] ✅ Water record: ${volume.toFixed(2)}L, User: ${user.phone}, Amount: ${amount}, Balance: ${balanceAfter}`);
 
     // 7. 返回响应（硬件协议格式）
     return {
@@ -535,7 +555,7 @@ async function handleWaterRecord(cmd) {
     };
 
   } catch (error) {
-    console.error('[TCP] Water record error:', error.message);
+    logError('[TCP] Water record error:', error.message);
     return {
       Cmd: 'WR',
       RFID: RFID,
@@ -571,7 +591,7 @@ async function handleMakeWater(cmd) {
       lastHeartbeatAt: new Date()
     });
 
-    console.log(`[TCP] ✅ Make water record: ${DId}, Time: ${FT}s, PWM: ${PWM}, TDS: ${TDS}`);
+    log(`[TCP] ✅ Make water record: ${DId}, Time: ${FT}s, PWM: ${PWM}, TDS: ${TDS}`);
 
     return {
       Cmd: 'Mk',
@@ -580,7 +600,7 @@ async function handleMakeWater(cmd) {
     };
 
   } catch (error) {
-    console.error('[TCP] Make water error:', error.message);
+    logError('[TCP] Make water error:', error.message);
     return {
       Cmd: 'Mk',
       RT: 'Fail',
@@ -637,7 +657,7 @@ async function handleAddMoney(cmd) {
       completedAt: new Date()
     });
 
-    console.log(`[TCP] ✅ Add money: ${RFID}, Amount: ${amount}, Balance: ${balanceAfter}`);
+    log(`[TCP] ✅ Add money: ${RFID}, Amount: ${amount}, Balance: ${balanceAfter}`);
 
     return {
       Cmd: 'AddMoney',
@@ -646,7 +666,7 @@ async function handleAddMoney(cmd) {
     };
 
   } catch (error) {
-    console.error('[TCP] Add money error:', error.message);
+    logError('[TCP] Add money error:', error.message);
     return {
       Cmd: 'AddMoney',
       RT: 'Fail',
@@ -705,7 +725,7 @@ async function handleOpenWater(cmd) {
       completedAt: new Date()
     });
 
-    console.log(`[TCP] ✅ Open water: ${RFID}, Amount: ${amount}, Type: ${Type}, Balance: ${balanceAfter}`);
+    log(`[TCP] ✅ Open water: ${RFID}, Amount: ${amount}, Type: ${Type}, Balance: ${balanceAfter}`);
 
     return {
       Cmd: 'OpenWater',
@@ -714,7 +734,7 @@ async function handleOpenWater(cmd) {
     };
 
   } catch (error) {
-    console.error('[TCP] Open water error:', error.message);
+    logError('[TCP] Open water error:', error.message);
     return {
       Cmd: 'OpenWater',
       RT: 'Fail',
@@ -733,7 +753,7 @@ async function updateDeviceStatus(deviceId, status) {
       { where: { deviceId } }
     );
   } catch (error) {
-    console.error('[TCP] Update device status error:', error.message);
+    logError('[TCP] Update device status error:', error.message);
   }
 }
 
@@ -742,11 +762,11 @@ async function updateDeviceStatus(deviceId, status) {
 // ========================================
 function start() {
   server.listen(TCP_PORT, '0.0.0.0', () => {
-    console.log(`[TCP] ✅ Server listening on port ${TCP_PORT}`);
+    log(`[TCP] ✅ Server listening on port ${TCP_PORT}`);
   });
 
   server.on('error', (error) => {
-    console.error('[TCP] ❌ Server error:', error.message);
+    logError('[TCP] ❌ Server error:', error.message);
   });
 }
 
@@ -756,7 +776,7 @@ function start() {
 function stop() {
   return new Promise((resolve) => {
     server.close(() => {
-      console.log('[TCP] ✅ Server stopped');
+      log('[TCP] ✅ Server stopped');
       resolve();
     });
   });
