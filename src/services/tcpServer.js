@@ -41,9 +41,10 @@ const server = net.createServer((socket) => {
   const clientId = `${socket.remoteAddress}:${socket.remotePort}`;
   log(`[TCP] 🔌 New connection: ${clientId}`);
 
-  // 方案1：发送CONNECT OK（符合原始印尼协议）
-  socket.write('CONNECT OK\n');
-  log(`[TCP] ⬅️ [SERVER→HARDWARE] Sent: CONNECT OK`);
+  // 不主动发送CONNECT OK，等待设备发送第一个命令
+  // CONNECT OK是GPRS模块格式，可能导致设备混淆
+  // 让设备通过TCP连接成功来判断，直接发送AU认证
+  log(`[TCP] ⏳ Waiting for device to send AU command...`);
 
   let deviceId = null;
   let buffer = '';
