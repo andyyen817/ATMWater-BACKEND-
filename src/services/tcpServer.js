@@ -41,10 +41,11 @@ const server = net.createServer((socket) => {
   const clientId = `${socket.remoteAddress}:${socket.remotePort}`;
   log(`[TCP] 🔌 New connection: ${clientId}`);
 
-  // 第1步：连接云平台 - 等待设备发送GT命令
-  // 根据协议流程：设备连接 → 设备发GT → 服务器回GT响应
-  // 不主动发送CONNECT OK
-  log(`[TCP] ⏳ Waiting for GT command from device...`);
+  // 第1步：连接云平台 - 立即发送CONNECT OK
+  // 设备等待60秒才发GT，说明它在等待CONNECT OK
+  // 使用\r\n结尾（GPRS模块标准格式）
+  socket.write('CONNECT OK\r\n');
+  log(`[TCP] ⬅️ [SERVER→HARDWARE] Sent: CONNECT OK (with \\r\\n)`);
 
   let deviceId = null;
   let buffer = '';
