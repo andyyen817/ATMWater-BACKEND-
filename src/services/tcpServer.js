@@ -3,6 +3,7 @@
 
 const net = require('net');
 const { User, PhysicalCard, Unit, Transaction } = require('../models');
+const websocketService = require('./websocketService');
 
 // 存储所有活跃的设备连接
 const deviceConnections = new Map();
@@ -256,6 +257,12 @@ const server = net.createServer((socket) => {
     if (deviceId) {
       deviceConnections.delete(deviceId);
       updateDeviceStatus(deviceId, 'Offline');
+
+      // 推送设备离线状态到前端
+      websocketService.sendDeviceUpdate(deviceId, {
+        status: 'Offline',
+        disconnectedAt: new Date()
+      });
     }
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
     clearInterval(statusInterval); // 清理状态报告定时器
@@ -377,6 +384,17 @@ async function handleAuth(cmd) {
     });
 
     log(`[TCP] ✅ Device authenticated: ${DId}, Version: ${Ver || 'Unknown'}, Signal: ${CSQ || 'N/A'}`);
+
+    // 推送设备上线状态到前端
+    websocketService.sendDeviceUpdate(fullDeviceId, {
+      status: 'Online',
+      type: Type,
+      version: Ver,
+      position: { lat: parseFloat(PosY), lng: parseFloat(PosX) },
+      signalQuality: parseInt(CSQ),
+      imei: DId,
+      timestamp: new Date()
+    });
 
     // 返回服务器时间戳（硬件协议格式）
     return {
@@ -655,7 +673,7 @@ async function handleWaterRecord(cmd, deviceId) {
     const transaction = await Transaction.create({
       userId: user.id,
       unitId: unit.id,
-      deviceId: DId,
+      deviceId: deviceId,
       type: 'WaterPurchase',
       amount: amount,
       balanceBefore: balanceBefore,
@@ -671,7 +689,7 @@ async function handleWaterRecord(cmd, deviceId) {
       recordId: RE,
       dispensingTime: parseInt(FT) || null,
       status: 'Completed',
-      completedAt: TE ? new Date(parseInt(TE)) : new Date()
+      completedAt: TE ? new Date(parseInt(TE) * 1000) : new Date()
     });
 
     // 6. 更新设备水质数据
@@ -682,6 +700,26 @@ async function handleWaterRecord(cmd, deviceId) {
     });
 
     log(`[TCP] ✅ Water record: ${volume.toFixed(2)}L, User: ${user.phone}, Amount: ${amount}, Balance: ${balanceAfter}`);
+
+    // 推送交易记录到前端
+    websocketService.sendTransactionUpdate({
+      id: transaction.id,
+      userId: user.id,
+      deviceId: deviceId,
+      rfid: RFID,
+      volume: volume,
+      amount: amount,
+      balanceAfter: balanceAfter,
+      timestamp: new Date()
+    });
+
+    // 推送设备水质更新到前端
+    websocketService.sendDeviceUpdate(deviceId, {
+      tds: parseInt(Tds),
+      inputTds: parseInt(IDS),
+      temperature: parseFloat(Tmp),
+      lastTransaction: new Date()
+    });
 
     // 7. 返回响应（硬件协议格式）
     return {
