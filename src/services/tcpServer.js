@@ -49,12 +49,22 @@ const server = net.createServer((socket) => {
   // 设备等待60秒才发GT，说明它在等待CONNECT OK
   // 使用\r\n结尾（GPRS模块标准格式）
   const connectTime = Date.now();
-  socket.write('CONNECT OK\r\n', (err) => {
+  const connectOkData = 'CONNECT OK\r\n';
+
+  log(`[TCP] 📤 Preparing to send CONNECT OK`);
+  log(`[TCP] 📤 CONNECT OK hex:`, Buffer.from(connectOkData).toString('hex'));
+  log(`[TCP] 📤 CONNECT OK length:`, connectOkData.length);
+
+  socket.write(connectOkData, (err) => {
     const sendTime = Date.now() - connectTime;
     if (err) {
       logError(`[TCP] ❌ Failed to send CONNECT OK:`, err);
+      logError(`[TCP] ❌ Error code:`, err.code);
+      logError(`[TCP] ❌ Error stack:`, err.stack);
     } else {
-      log(`[TCP] ⬅️ [SERVER→HARDWARE] CONNECT OK sent successfully (${sendTime}ms)`);
+      log(`[TCP] ✅ CONNECT OK sent successfully (${sendTime}ms)`);
+      log(`[TCP] ✅ Socket writable:`, socket.writable);
+      log(`[TCP] ✅ Socket buffered bytes:`, socket.bufferSize);
     }
   });
   log(`[TCP] ⬅️ [SERVER→HARDWARE] Sending: CONNECT OK (with \\r\\n)`);
@@ -78,10 +88,44 @@ const server = net.createServer((socket) => {
   // 这样设备有足够时间发送GT和AU命令
   log(`[TCP] ⏳ Waiting for device authentication (GT → AU)...`);
 
+  // 添加Socket状态监控
+  socket.on('drain', () => {
+    log(`[TCP] 💧 Socket drain event - write buffer emptied`);
+  });
+
+  socket.on('timeout', () => {
+    log(`[TCP] ⏰ Socket timeout event`);
+  });
+
+  socket.on('end', () => {
+    log(`[TCP] 🔚 Socket end event - other end sent FIN`);
+  });
+
+  // 每30秒报告一次连接状态
+  const statusInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - connectTime) / 1000);
+    log(`[TCP] 📊 Status report (${elapsed}s since connect):`);
+    log(`[TCP] 📊   - Socket writable:`, socket.writable);
+    log(`[TCP] 📊   - Socket readable:`, socket.readable);
+    log(`[TCP] 📊   - Socket destroyed:`, socket.destroyed);
+    log(`[TCP] 📊   - Bytes written:`, socket.bytesWritten);
+    log(`[TCP] 📊   - Bytes read:`, socket.bytesRead);
+    log(`[TCP] 📊   - Device ID:`, deviceId || 'Not set');
+    log(`[TCP] 📊   - Authenticated:`, isAuthenticated);
+  }, 30000);
+
   // ========================================
   // 接收数据
   // ========================================
   socket.on('data', async (data) => {
+    const receiveTime = Date.now();
+    const timeSinceConnect = receiveTime - connectTime;
+
+    log(`[TCP] 📥 Data received after ${timeSinceConnect}ms (${Math.floor(timeSinceConnect/1000)}s) from connection`);
+    log(`[TCP] 📥 Data length:`, data.length);
+    log(`[TCP] 📥 Data hex:`, data.toString('hex'));
+    log(`[TCP] 📥 Data string:`, JSON.stringify(data.toString()));
+
     buffer += data.toString();
 
     // 处理多条消息（以 \n 分隔）
@@ -104,8 +148,16 @@ const server = net.createServer((socket) => {
         // 使用全局匹配提取所有JSON对象
         const jsonMatches = cleanMessage.match(/\{[^}]*\}/g);
 
+        log(`[TCP] 🧹 Original message length:`, message.length);
+        log(`[TCP] 🧹 Clean message length:`, cleanMessage.length);
+        log(`[TCP] 🧹 Clean message:`, JSON.stringify(cleanMessage));
+
         if (jsonMatches && jsonMatches.length > 0) {
           log(`[TCP] 🧹 Found ${jsonMatches.length} JSON object(s) in message`);
+
+          jsonMatches.forEach((json, index) => {
+            log(`[TCP] 🧹 JSON[${index}]:`, json);
+          });
 
           // 处理每个JSON对象
           for (const jsonStr of jsonMatches) {
@@ -193,6 +245,7 @@ const server = net.createServer((socket) => {
       updateDeviceStatus(deviceId, 'Offline');
     }
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
+    clearInterval(statusInterval); // 清理状态报告定时器
   });
 
   // ========================================
