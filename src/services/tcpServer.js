@@ -132,6 +132,17 @@ const server = net.createServer((socket) => {
     const messages = buffer.split('\n');
     buffer = messages.pop(); // 保留不完整的消息
 
+    // 【修复】如果buffer中有完整的JSON但没有换行符，也要处理
+    // 检查buffer是否包含完整的JSON对象
+    if (buffer.trim() && buffer.includes('{') && buffer.includes('}')) {
+      const jsonTest = buffer.match(/\{[^}]*\}/);
+      if (jsonTest) {
+        log(`[TCP] 🔧 Found complete JSON in buffer without newline, processing it`);
+        messages.push(buffer);
+        buffer = '';
+      }
+    }
+
     for (const message of messages) {
       if (!message.trim()) continue;
 
