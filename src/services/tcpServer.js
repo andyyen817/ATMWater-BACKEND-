@@ -62,6 +62,7 @@ const server = net.createServer((socket) => {
   let deviceId = null;
   let buffer = '';
   let heartbeatTimer = null;
+  let isAuthenticated = false; // 标记设备是否已认证
 
   // 设置心跳超时检测
   const resetHeartbeat = () => {
@@ -72,7 +73,10 @@ const server = net.createServer((socket) => {
     }, HEARTBEAT_TIMEOUT);
   };
 
-  resetHeartbeat();
+  // 【方案2】不在连接时启动心跳超时
+  // 只在AU认证成功后才启动心跳超时检测
+  // 这样设备有足够时间发送GT和AU命令
+  log(`[TCP] ⏳ Waiting for device authentication (GT → AU)...`);
 
   // ========================================
   // 接收数据
@@ -118,6 +122,20 @@ const server = net.createServer((socket) => {
               const cmdProcessTime = Date.now() - cmdStartTime;
               log(`[TCP] ⏱️ Command processing time: ${cmdProcessTime}ms`);
 
+              // 【方案2】如果是AU认证成功，启动心跳超时
+              if (cmd.Cmd === 'AU' && response && response.Time) {
+                if (!isAuthenticated) {
+                  isAuthenticated = true;
+                  resetHeartbeat();
+                  log(`[TCP] ✅ Authentication successful, heartbeat timeout started (${HEARTBEAT_TIMEOUT/1000}s)`);
+                }
+              }
+
+              // 【方案2】如果已认证，每次收到消息都重置心跳
+              if (isAuthenticated && cmd.Cmd === 'HB') {
+                resetHeartbeat();
+              }
+
               if (response) {
                 // 使用\r\n作为行尾符（与GPRS模块格式一致）
                 const responseStr = JSON.stringify(response) + '\r\n';
@@ -146,8 +164,7 @@ const server = net.createServer((socket) => {
                 deviceConnections.set(deviceId, socket);
               }
 
-              // 重置心跳计时器
-              resetHeartbeat();
+              // 【方案2】不在这里重置心跳，只在AU认证成功和HB心跳时重置
 
             } catch (parseError) {
               logError(`[TCP] ❌ Failed to parse JSON object:`, jsonStr);
