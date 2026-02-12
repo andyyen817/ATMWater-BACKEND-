@@ -337,7 +337,7 @@ async function handleGPRSTest(cmd) {
 // AU - 设备认证
 // ========================================
 async function handleAuth(cmd) {
-  const { DId, Type, Pwd, Ver } = cmd;
+  const { DId, Type, Pwd, Ver, PosX, PosY, CSQ, crc } = cmd;
 
   try {
     // 构造完整的deviceId：IMEI + "0001"
@@ -363,14 +363,20 @@ async function handleAuth(cmd) {
       };
     }
 
-    // 更新设备状态和固件版本
+    // 更新设备状态、固件版本和新字段
     await unit.update({
       status: 'Online',
       lastHeartbeatAt: new Date(),
-      firmwareVersion: Ver || null
+      firmwareVersion: Ver || null,
+      deviceType: Type || unit.deviceType,
+      latitude: PosY ? parseFloat(PosY) : unit.latitude,
+      longitude: PosX ? parseFloat(PosX) : unit.longitude,
+      signalQuality: CSQ ? parseInt(CSQ) : null,
+      crcChecksum: crc || null,
+      imei: DId || unit.imei
     });
 
-    log(`[TCP] ✅ Device authenticated: ${DId}, Version: ${Ver || 'Unknown'}`);
+    log(`[TCP] ✅ Device authenticated: ${DId}, Version: ${Ver || 'Unknown'}, Signal: ${CSQ || 'N/A'}`);
 
     // 返回服务器时间戳（硬件协议格式）
     return {

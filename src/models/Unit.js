@@ -101,6 +101,25 @@ const Unit = sequelize.define('Unit', {
     comment: '每升脉冲数（用于PWM转换为升）'
   },
 
+  // ========== 硬件通信字段 ==========
+  signalQuality: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: '信号质量（CSQ，0-31）'
+  },
+
+  crcChecksum: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    comment: 'CRC校验码'
+  },
+
+  imei: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    comment: 'IMEI号（原始DId）'
+  },
+
   // ========== 固件信息 ==========
   firmwareVersion: {
     type: DataTypes.STRING(50),
