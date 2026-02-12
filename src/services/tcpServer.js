@@ -41,11 +41,23 @@ const server = net.createServer((socket) => {
   const clientId = `${socket.remoteAddress}:${socket.remotePort}`;
   log(`[TCP] 🔌 New connection: ${clientId}`);
 
+  // 【优化1】禁用Nagle算法，确保数据立即发送（不等待缓冲区满）
+  socket.setNoDelay(true);
+  log(`[TCP] ⚙️ Socket configured: NoDelay=true (Nagle disabled)`);
+
   // 第1步：连接云平台 - 立即发送CONNECT OK
   // 设备等待60秒才发GT，说明它在等待CONNECT OK
   // 使用\r\n结尾（GPRS模块标准格式）
-  socket.write('CONNECT OK\r\n');
-  log(`[TCP] ⬅️ [SERVER→HARDWARE] Sent: CONNECT OK (with \\r\\n)`);
+  const connectTime = Date.now();
+  socket.write('CONNECT OK\r\n', (err) => {
+    const sendTime = Date.now() - connectTime;
+    if (err) {
+      logError(`[TCP] ❌ Failed to send CONNECT OK:`, err);
+    } else {
+      log(`[TCP] ⬅️ [SERVER→HARDWARE] CONNECT OK sent successfully (${sendTime}ms)`);
+    }
+  });
+  log(`[TCP] ⬅️ [SERVER→HARDWARE] Sending: CONNECT OK (with \\r\\n)`);
 
   let deviceId = null;
   let buffer = '';
@@ -97,14 +109,35 @@ const server = net.createServer((socket) => {
               const cmd = JSON.parse(jsonStr);
               log(`[TCP] ➡️ [HARDWARE→SERVER] Parsed command:`, cmd);
 
+              // 【优化4】记录命令处理开始时间
+              const cmdStartTime = Date.now();
+
               const response = await handleCommand(cmd, socket);
+
+              // 【优化4】记录命令处理耗时
+              const cmdProcessTime = Date.now() - cmdStartTime;
+              log(`[TCP] ⏱️ Command processing time: ${cmdProcessTime}ms`);
 
               if (response) {
                 // 使用\r\n作为行尾符（与GPRS模块格式一致）
                 const responseStr = JSON.stringify(response) + '\r\n';
-                socket.write(responseStr);
+
+                // 【优化2】记录响应发送开始时间
+                const sendStartTime = Date.now();
+
+                // 【优化2】添加回调确认发送成功
+                socket.write(responseStr, (err) => {
+                  const sendTime = Date.now() - sendStartTime;
+                  if (err) {
+                    logError(`[TCP] ❌ Failed to send response:`, err);
+                  } else {
+                    log(`[TCP] ✅ Response sent successfully (${sendTime}ms)`);
+                  }
+                });
+
                 log(`[TCP] ⬅️ [SERVER→HARDWARE] Sending response:`, response);
                 log(`[TCP] ⬅️ [SERVER→HARDWARE] Raw JSON sent:`, JSON.stringify(responseStr));
+                log(`[TCP] ⏱️ Total response time (process + send): ${Date.now() - cmdStartTime}ms`);
               }
 
               // 更新设备ID
@@ -205,9 +238,10 @@ async function handleGPRSTest(cmd) {
 
   log(`[TCP] 📡 GPRS test from device: ${DId}`);
 
+  // 【优化3】GT命令处理是同步的，无数据库查询，无异步操作
+  // 立即返回响应，确保毫秒级响应时间
   // 第2步：GT命令 - 遵循"一问一答原则"
   // 设备发送GT → 服务器只返回GT的JSON响应
-  // 不需要额外发送CONNECT OK或其他内容
   return {
     Cmd: 'GT',
     DId: DId,
