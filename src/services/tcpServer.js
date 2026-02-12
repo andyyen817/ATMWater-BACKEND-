@@ -179,7 +179,7 @@ const server = net.createServer((socket) => {
               // 【优化4】记录命令处理开始时间
               const cmdStartTime = Date.now();
 
-              const response = await handleCommand(cmd, socket);
+              const response = await handleCommand(cmd, socket, deviceId);
 
               // 【优化4】记录命令处理耗时
               const cmdProcessTime = Date.now() - cmdStartTime;
@@ -223,8 +223,10 @@ const server = net.createServer((socket) => {
 
               // 更新设备ID
               if (cmd.DId) {
-                deviceId = cmd.DId;
+                // 构造完整的deviceId：IMEI + "0001"
+                deviceId = cmd.DId + '0001';
                 deviceConnections.set(deviceId, socket);
+                log(`[TCP] 📱 Device ID constructed: ${deviceId} (IMEI: ${cmd.DId})`);
               }
 
               // 【方案2】不在这里重置心跳，只在AU认证成功和HB心跳时重置
@@ -270,7 +272,7 @@ const server = net.createServer((socket) => {
 // ========================================
 // 指令处理函数
 // ========================================
-async function handleCommand(cmd, socket) {
+async function handleCommand(cmd, socket, deviceId) {
   const { Cmd, DId } = cmd;
 
   switch (Cmd) {
@@ -284,7 +286,7 @@ async function handleCommand(cmd, socket) {
       return await handleHeartbeat(cmd);
 
     case 'WR': // 用水数据记录上报（硬件协议核心指令）
-      return await handleWaterRecord(cmd);
+      return await handleWaterRecord(cmd, deviceId);
 
     case 'Mk': // 制水记录
       return await handleMakeWater(cmd);
@@ -338,8 +340,11 @@ async function handleAuth(cmd) {
   const { DId, Type, Pwd, Ver } = cmd;
 
   try {
+    // 构造完整的deviceId：IMEI + "0001"
+    const fullDeviceId = DId + '0001';
+
     // 查询设备
-    const unit = await Unit.findOne({ where: { deviceId: DId } });
+    const unit = await Unit.findOne({ where: { deviceId: fullDeviceId } });
 
     if (!unit) {
       return {
@@ -578,12 +583,12 @@ async function handleWaterQuality(cmd) {
 // ========================================
 // WR - 用水数据记录上报 (硬件协议核心指令)
 // ========================================
-async function handleWaterRecord(cmd) {
-  const { DId, TE, RFID, PWM, Money, FT, Tds, IDS, RE, Tmp } = cmd;
+async function handleWaterRecord(cmd, deviceId) {
+  const { TE, RFID, PWM, Money, FT, Tds, IDS, RE, Tmp } = cmd;
 
   try {
     // 1. 查找设备
-    const unit = await Unit.findOne({ where: { deviceId: DId } });
+    const unit = await Unit.findOne({ where: { deviceId } });
     if (!unit) {
       return {
         Cmd: 'WR',
