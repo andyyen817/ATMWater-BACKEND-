@@ -25,7 +25,7 @@ async function runMigration() {
     console.log('✅ 数据库连接成功\n');
 
     // 读取SQL文件
-    const sqlFile = path.join(__dirname, 'database-migration.sql');
+    const sqlFile = path.join(__dirname, 'migrations', 'add_unit_fields_20260212.sql');
     console.log('📄 读取迁移文件:', sqlFile);
     const sql = fs.readFileSync(sqlFile, 'utf8');
 
@@ -82,10 +82,8 @@ async function runMigration() {
     console.log('\n📊 验证新字段...\n');
 
     const [unitsFields] = await sequelize.query('DESCRIBE units');
-    const [transactionsFields] = await sequelize.query('DESCRIBE transactions');
 
-    const newUnitsFields = ['firmware_version', 'pulse_per_liter', 'error_codes'];
-    const newTransactionsFields = ['pulse_count', 'input_tds', 'output_tds', 'water_temp', 'record_id', 'dispensing_time'];
+    const newUnitsFields = ['signal_quality', 'crc_checksum', 'imei'];
 
     console.log('Units表新字段:');
     newUnitsFields.forEach(field => {
@@ -93,11 +91,19 @@ async function runMigration() {
       console.log(`  ${exists ? '✅' : '❌'} ${field}`);
     });
 
-    console.log('\nTransactions表新字段:');
-    newTransactionsFields.forEach(field => {
-      const exists = transactionsFields.some(f => f.Field === field);
-      console.log(`  ${exists ? '✅' : '❌'} ${field}`);
-    });
+    // 显示示例数据
+    console.log('\n📊 示例数据（前5条）：\n');
+    const [rows] = await sequelize.query(`
+      SELECT device_id, imei, signal_quality, crc_checksum
+      FROM units
+      LIMIT 5
+    `);
+
+    if (rows.length > 0) {
+      console.table(rows);
+    } else {
+      console.log('   (暂无数据)');
+    }
 
     console.log('\n✅ 迁移验证完成！');
     process.exit(0);
