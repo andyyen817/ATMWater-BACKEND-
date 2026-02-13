@@ -610,10 +610,17 @@ async function handleWaterQuality(cmd) {
 async function handleWaterRecord(cmd, deviceId) {
   const { TE, RFID, PWM, Money, FT, Tds, IDS, RE, Tmp } = cmd;
 
+  // 添加诊断日志
+  log(`[TCP] 🔍 WR command processing:`);
+  log(`[TCP] 🔍   - deviceId: ${deviceId}`);
+  log(`[TCP] 🔍   - RFID: ${RFID}`);
+  log(`[TCP] 🔍   - Amount: ${Money}`);
+
   try {
     // 1. 查找设备
     const unit = await Unit.findOne({ where: { deviceId } });
     if (!unit) {
+      logError(`[TCP] ❌ Device not found: ${deviceId}`);
       return {
         Cmd: 'WR',
         RFID: RFID,
@@ -624,6 +631,7 @@ async function handleWaterRecord(cmd, deviceId) {
         DayLmt: '-1'
       };
     }
+    log(`[TCP] ✅ Device found: ${unit.deviceName}`);
 
     // 2. 查找用户（通过实体卡或虚拟卡）
     let user = null;
@@ -645,6 +653,8 @@ async function handleWaterRecord(cmd, deviceId) {
     }
 
     if (!user) {
+      logError(`[TCP] ❌ User/Card not found: RFID=${RFID}`);
+      logError(`[TCP] ❌ Checked physical cards and virtual RFID`);
       return {
         Cmd: 'WR',
         RFID: RFID,
@@ -655,6 +665,7 @@ async function handleWaterRecord(cmd, deviceId) {
         DayLmt: '-1'
       };
     }
+    log(`[TCP] ✅ User found: ${user.phone}, Balance: ${user.balance}`);
 
     // 3. 计算水量（PWM脉冲数转换为升）
     const pulseCount = parseInt(PWM) || 0;
@@ -733,7 +744,10 @@ async function handleWaterRecord(cmd, deviceId) {
     };
 
   } catch (error) {
-    logError('[TCP] Water record error:', error.message);
+    logError('[TCP] ❌ Water record error:', error.message);
+    logError('[TCP] ❌ Error stack:', error.stack);
+    logError('[TCP] ❌ deviceId:', deviceId);
+    logError('[TCP] ❌ RFID:', RFID);
     return {
       Cmd: 'WR',
       RFID: RFID,
