@@ -53,6 +53,13 @@ exports.dispenseByQR = async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
+    // 4.1 确保 virtualRfid 存在（兼容旧用户）
+    if (!user.virtualRfid && user.phoneNumber) {
+      const vRfid = `VIRT_${user.phoneNumber}`;
+      await user.update({ virtualRfid: vRfid });
+      console.log(`[QR Dispense] Auto-generated virtualRfid for user ${userId}: ${vRfid}`);
+    }
+
     // 5. 获取区域定价
     const pricing = await getUnitPricing(targetDeviceId);
     const pricePerLiter = waterType === 'pure'

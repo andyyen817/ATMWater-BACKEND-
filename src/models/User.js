@@ -162,8 +162,8 @@ User.beforeCreate(async (user) => {
   }
   
   // 自动生成虚拟RFID（使用手机号）
-  if (!user.virtualRfid && user.phone) {
-    user.virtualRfid = `VIRT_${user.phone}`;
+  if (!user.virtualRfid && user.phoneNumber) {
+    user.virtualRfid = `VIRT_${user.phoneNumber}`;
   }
   
   // 自动生成推荐码
@@ -176,6 +176,10 @@ User.beforeCreate(async (user) => {
 User.beforeUpdate(async (user) => {
   if (user.changed('password')) {
     user.password = await bcrypt.hash(user.password, 10);
+  }
+  // 自动补全虚拟RFID（兼容旧用户）
+  if (!user.virtualRfid && user.phoneNumber) {
+    user.virtualRfid = `VIRT_${user.phoneNumber}`;
   }
 });
 

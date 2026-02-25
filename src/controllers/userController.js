@@ -264,9 +264,7 @@ exports.uploadUserLog = async (req, res) => {
 
         // 记录审计日志
         await logAction(
-            userId,
-            req.user.name || req.user.phoneNumber,
-            req.user.role || 'user',
+            req,
             'user',
             'upload_log',
             {
@@ -274,7 +272,6 @@ exports.uploadUserLog = async (req, res) => {
                 logCount: Array.isArray(logs) ? logs.length : 1,
                 appVersion
             },
-            req.ip,
             'success'
         );
 
