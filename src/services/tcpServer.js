@@ -874,7 +874,18 @@ async function handleOpenWater(cmd) {
   const { RFID, Money, PWM, Type, RE } = cmd;
 
   try {
-    // 查找用户（虚拟账户，以'w'开头）
+    // 如果 RE 以 QR_ 开头，说明是 APP 扫码发起的命令回传
+    // qrDispenseController 已完成扣款和交易记录，这里直接返回 OK
+    if (RE && RE.startsWith('QR_')) {
+      log(`[TCP] ✅ QR scan OpenWater ack: ${RFID}, RE: ${RE}`);
+      return {
+        Cmd: 'OpenWater',
+        RT: 'OK',
+        RC: RE
+      };
+    }
+
+    // 以下是设备主动发起的 OpenWater（如刷实体卡）
     const user = await User.findOne({ where: { virtualRfid: RFID } });
 
     if (!user) {
@@ -887,7 +898,6 @@ async function handleOpenWater(cmd) {
 
     const amount = parseFloat(Money) || 0;
 
-    // 检查余额
     if (user.balance < amount) {
       return {
         Cmd: 'OpenWater',
@@ -896,13 +906,11 @@ async function handleOpenWater(cmd) {
       };
     }
 
-    // 扣款
     const balanceBefore = user.balance;
     const balanceAfter = balanceBefore - amount;
 
     await user.update({ balance: balanceAfter });
 
-    // 创建交易记录
     await Transaction.create({
       userId: user.id,
       type: 'WaterPurchase',
@@ -975,11 +983,53 @@ function stop() {
 }
 
 // ========================================
+// 主动向设备发送命令（扫码取水用）
+// ========================================
+/**
+ * 向已连接的设备发送 TCP JSON 命令
+ * @param {string} deviceId - 设备ID
+ * @param {Object} command - JSON 命令对象（如 OpenWater）
+ * @returns {Promise<boolean>}
+ */
+function sendCommandToDevice(deviceId, command) {
+  return new Promise((resolve, reject) => {
+    const socket = deviceConnections.get(deviceId);
+    if (!socket || socket.destroyed) {
+      reject(new Error(`Device ${deviceId} is not connected`));
+      return;
+    }
+
+    const data = JSON.stringify(command) + '\r\n';
+    socket.write(data, (err) => {
+      if (err) {
+        logError(`[TCP] Failed to send command to ${deviceId}:`, err.message);
+        reject(err);
+      } else {
+        log(`[TCP] ✅ Command sent to ${deviceId}:`, JSON.stringify(command));
+        resolve(true);
+      }
+    });
+  });
+}
+
+/**
+ * 检查设备是否在线（TCP连接是否存活）
+ * @param {string} deviceId - 设备ID
+ * @returns {boolean}
+ */
+function isDeviceConnected(deviceId) {
+  const socket = deviceConnections.get(deviceId);
+  return !!(socket && !socket.destroyed && socket.writable);
+}
+
+// ========================================
 // 导出
 // ========================================
 module.exports = {
   start,
   stop,
-  deviceConnections
+  deviceConnections,
+  sendCommandToDevice,
+  isDeviceConnected
 };
 

@@ -36,7 +36,7 @@ exports.getWaterPricing = async (req, res) => {
  */
 exports.getSettings = async (req, res) => {
     try {
-        const settings = await Setting.find();
+        const settings = await Setting.findAll();
         res.status(200).json({ success: true, data: settings });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server Error' });
@@ -52,11 +52,12 @@ exports.updateSetting = async (req, res) => {
         const { key } = req.params;
         const updateData = req.body; // 可以包含 prices 或 ratios
 
-        const setting = await Setting.findOneAndUpdate(
-            { key },
-            { ...updateData, updatedBy: req.user.id },
-            { new: true, upsert: true }
-        );
+        let setting = await Setting.findOne({ where: { key } });
+        if (setting) {
+            await setting.update({ ...updateData, updatedBy: req.user.id });
+        } else {
+            setting = await Setting.create({ key, ...updateData, updatedBy: req.user.id });
+        }
 
         // [P3-WEB-006] 记录审计日志
         await logAction(req, 'Settings', `UPDATE_${key.toUpperCase()}`, { newValue: updateData });
@@ -104,54 +105,67 @@ exports.seedSettings = async () => {
         ];
 
         for (const s of defaultSettings) {
-            await Setting.updateOne(
-                { key: s.key },
-                { $setOnInsert: s },
-                { upsert: true }
-            );
+            await Setting.findOrCreate({
+                where: { key: s.key },
+                defaults: s
+            });
             console.log(`[Settings] Ensured default setting exists: ${s.key}`);
         }
 
         // 2. 初始化权限矩阵 (P1-WEB-001)
         const defaultPermissions = [
-            { 
-                functionKey: 'view_dashboard', 
+            {
+                functionKey: 'view_dashboard',
                 label: 'View Dashboard & KPIs',
-                permissions: { GM: true, Finance: true, Business: true, AfterSales: true }
+                permissions: { GM: true, Finance: true, Business: true, AfterSales: true, RP: false, Steward: false }
             },
-            { 
-                functionKey: 'manage_units', 
+            {
+                functionKey: 'manage_units',
                 label: 'Manage Unit Lock/Unlock',
-                permissions: { GM: true, Finance: false, Business: false, AfterSales: false }
+                permissions: { GM: true, Finance: false, Business: false, AfterSales: false, RP: false, Steward: false }
             },
-            { 
-                functionKey: 'edit_prices', 
+            {
+                functionKey: 'edit_prices',
                 label: 'Edit Water Prices (水价设置)',
-                permissions: { GM: true, Finance: false, Business: false, AfterSales: false }
+                permissions: { GM: true, Finance: false, Business: false, AfterSales: false, RP: false, Steward: false }
             },
-            { 
-                functionKey: 'approve_withdrawals', 
+            {
+                functionKey: 'approve_withdrawals',
                 label: 'Approve Withdrawal (提现审核)',
-                permissions: { GM: true, Finance: true, Business: false, AfterSales: false }
+                permissions: { GM: true, Finance: true, Business: false, AfterSales: false, RP: false, Steward: false }
             },
-            { 
-                functionKey: 'manage_partners', 
+            {
+                functionKey: 'manage_partners',
                 label: 'Manage Steward & RP Bindings',
-                permissions: { GM: true, Finance: false, Business: true, AfterSales: false }
+                permissions: { GM: true, Finance: false, Business: true, AfterSales: false, RP: false, Steward: false }
             },
-            { 
-                functionKey: 'view_logs', 
+            {
+                functionKey: 'view_logs',
                 label: 'View Technical/Quality Logs',
-                permissions: { GM: true, Finance: false, Business: false, AfterSales: true }
+                permissions: { GM: true, Finance: false, Business: false, AfterSales: true, RP: false, Steward: false }
+            },
+            {
+                functionKey: 'view_own_units',
+                label: '查看自己管理的水站 (RP/水管家)',
+                permissions: { GM: true, Finance: false, Business: false, AfterSales: false, RP: true, Steward: true }
+            },
+            {
+                functionKey: 'view_own_stewards',
+                label: '查看下属水管家列表 (RP)',
+                permissions: { GM: true, Finance: false, Business: false, AfterSales: false, RP: true, Steward: false }
+            },
+            {
+                functionKey: 'view_profit_sharing',
+                label: '查看分润收益报表 (RP/水管家)',
+                permissions: { GM: true, Finance: true, Business: false, AfterSales: false, RP: true, Steward: true }
             }
         ];
 
         for (const p of defaultPermissions) {
-            await Permission.updateOne(
-                { functionKey: p.functionKey },
-                { $setOnInsert: p },
-                { upsert: true }
-            );
+            await Permission.findOrCreate({
+                where: { functionKey: p.functionKey },
+                defaults: p
+            });
         }
         console.log(`[Permissions] Initialized default permission matrix`);
 

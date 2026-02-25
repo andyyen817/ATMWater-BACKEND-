@@ -158,6 +158,43 @@ const Unit = sequelize.define('Unit', {
     type: DataTypes.DATE,
     allowNull: true,
     comment: '最后维护时间'
+  },
+
+  // ========== 分润系统字段 ==========
+  regionCode: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    comment: '所属区域代码'
+  },
+
+  rpOwnerId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: '区域RP负责人ID'
+  },
+
+  profitSharingEnabled: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+    comment: '是否启用分润'
+  },
+
+  monthlyFreeThreshold: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 17100,
+    comment: '月度免分润阈值（升）：前17100升归总部，超出后水管家80%/RP20%'
+  },
+
+  stewardProfitRatio: {
+    type: DataTypes.DECIMAL(5, 2),
+    defaultValue: 80,
+    comment: '水管家分润比例（%）'
+  },
+
+  rpProfitRatio: {
+    type: DataTypes.DECIMAL(5, 2),
+    defaultValue: 20,
+    comment: 'RP分润比例（%）'
   }
 }, {
   tableName: 'units',
@@ -167,7 +204,9 @@ const Unit = sequelize.define('Unit', {
     { fields: ['device_id'], unique: true },
     { fields: ['status'] },
     { fields: ['steward_id'] },
-    { fields: ['is_active'] }
+    { fields: ['is_active'] },
+    { fields: ['region_code'] },
+    { fields: ['rp_owner_id'] }
   ]
 });
 

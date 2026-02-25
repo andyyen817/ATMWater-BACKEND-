@@ -9,6 +9,25 @@ const generateReferralCode = () => {
     return crypto.randomBytes(3).toString('hex').toUpperCase();
 };
 
+// OTP 速率限制：同一号码 10 分钟内最多 3 次
+const otpRateLimit = new Map(); // key: phoneNumber, value: { count, firstRequestAt }
+const OTP_RATE_LIMIT_MAX = 3;
+const OTP_RATE_LIMIT_WINDOW = 10 * 60 * 1000; // 10 minutes
+
+function checkOtpRateLimit(phoneNumber) {
+    const now = Date.now();
+    const record = otpRateLimit.get(phoneNumber);
+    if (!record || (now - record.firstRequestAt > OTP_RATE_LIMIT_WINDOW)) {
+        otpRateLimit.set(phoneNumber, { count: 1, firstRequestAt: now });
+        return true;
+    }
+    if (record.count >= OTP_RATE_LIMIT_MAX) {
+        return false;
+    }
+    record.count++;
+    return true;
+}
+
 /**
  * @desc    设置或重置密码
  * @route   POST /api/auth/set-password
@@ -39,8 +58,19 @@ exports.loginWithPassword = async (req, res) => {
     console.log('--- PASSWORD LOGIN RECEIVED ---', req.body);
     try {
         const { phoneNumber, password } = req.body;
-        console.log('[Login] Looking for phone:', phoneNumber);
-        const user = await User.findOne({ where: { phoneNumber } });
+
+        // Normalize phone number: accept '81234567891', '081234567891', '+6281234567891'
+        let normalizedPhone = phoneNumber ? phoneNumber.trim() : '';
+        if (normalizedPhone.startsWith('+62')) {
+            normalizedPhone = '0' + normalizedPhone.slice(3);
+        } else if (normalizedPhone.startsWith('62') && normalizedPhone.length >= 11) {
+            normalizedPhone = '0' + normalizedPhone.slice(2);
+        } else if (!normalizedPhone.startsWith('0') && normalizedPhone.length >= 9) {
+            normalizedPhone = '0' + normalizedPhone;
+        }
+
+        console.log('[Login] Looking for phone:', normalizedPhone);
+        const user = await User.findOne({ where: { phoneNumber: normalizedPhone } });
         console.log('[Login] User found:', user ? 'YES' : 'NO');
         if (user) {
             console.log('[Login] Has password:', user.password ? 'YES' : 'NO');
@@ -71,29 +101,37 @@ exports.loginWithPassword = async (req, res) => {
     }
 };
 
-// @desc    请求发送 OTP
+// @desc    请求发送 WhatsApp OTP
 exports.requestOTP = async (req, res) => {
-    console.log('--- OTP REQUEST RECEIVED ---', req.body);
+    console.log('--- WHATSAPP OTP REQUEST RECEIVED ---', req.body);
     try {
-        const { phoneNumber, referrerCode } = req.body; // 注册时可选传入推荐码
+        const { phoneNumber, referrerCode } = req.body;
 
         if (!phoneNumber) {
-            return res.status(400).json({ message: 'Phone number is required' });
+            return res.status(400).json({ success: false, message: 'Phone number is required' });
         }
 
-        const otp = Math.floor(1000 + Math.random() * 9000).toString();
+        // 速率限制检查
+        if (!checkOtpRateLimit(phoneNumber)) {
+            return res.status(429).json({
+                success: false,
+                message: 'Too many OTP requests. Please try again later.',
+                retryAfter: 600
+            });
+        }
+
+        // 生成 6 位 OTP（WhatsApp 模板标准）
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
 
         let user = await User.findOne({ where: { phoneNumber } });
 
         if (!user) {
-            // 新用户注册
             user = await User.create({
                 phoneNumber,
                 referralCode: generateReferralCode()
             });
 
-            // 处理推荐关系
             if (referrerCode) {
                 const referrer = await User.findOne({ where: { referralCode: referrerCode.toUpperCase() } });
                 if (referrer) {
@@ -108,71 +146,180 @@ exports.requestOTP = async (req, res) => {
         user.otpExpires = otpExpires;
         await user.save();
 
-        // 4. 发送 OTP (通过通用消息服务)
+        // 发送 OTP (通过 WhatsApp 消息服务)
         await messageService.sendOTP(phoneNumber, otp);
 
         res.status(200).json({
             success: true,
-            message: 'OTP sent successfully',
-            // 生产环境下建议通过环境变量决定是否返回 debug_otp
-            debug_otp: process.env.NODE_ENV === 'production' ? undefined : otp 
+            message: 'OTP sent via WhatsApp',
+            channel: 'whatsapp',
+            expiresIn: 300,
+            debug_otp: process.env.NODE_ENV === 'production' ? undefined : otp
         });
 
     } catch (error) {
-        console.error('OTP Request Error:', error.message);
-        res.status(500).json({ message: 'Failed to send OTP' });
+        console.error('WhatsApp OTP Request Error:', error.message);
+        res.status(500).json({ success: false, message: error.message || 'Failed to send WhatsApp OTP' });
     }
 };
 
-// @desc    验证 OTP 并登录
+// @desc    验证 WhatsApp OTP 并登录
 // @route   POST /api/auth/verify-otp
 exports.verifyOTP = async (req, res) => {
     try {
         const { phoneNumber, otp } = req.body;
 
         if (!phoneNumber || !otp) {
-            return res.status(400).json({ message: 'Phone number and OTP are required' });
+            return res.status(400).json({ success: false, message: 'Phone number and OTP are required' });
         }
 
-        // 1. 查找用户
         const user = await User.findOne({ where: { phoneNumber } });
 
         if (!user) {
-            return res.status(404).json({ message: 'User not found' });
+            return res.status(404).json({ success: false, message: 'User not found' });
         }
 
-        // 2. 验证 OTP 是否匹配且未过期
         if (user.otp !== otp || user.otpExpires < Date.now()) {
-            return res.status(400).json({ message: 'Invalid or expired OTP' });
+            return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
         }
 
-        // 3. 验证成功，清除 OTP 并更新最后登录时间
         user.otp = undefined;
         user.otpExpires = undefined;
-        user.lastLogin = Date.now();
+        user.lastLoginAt = new Date();
+        user.isVerified = true;
         await user.save();
 
-        // 4. 生成 JWT Token
         const token = jwt.sign(
             { id: user.id, role: user.role },
             process.env.JWT_SECRET,
             { expiresIn: '30d' }
         );
 
+        const refreshToken = jwt.sign(
+            { id: user.id },
+            process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+            { expiresIn: '30d' }
+        );
+
         res.status(200).json({
             success: true,
-            token,
-            user: {
-                id: user.id,
-                phoneNumber: user.phoneNumber,
-                role: user.role,
-                name: user.name,
-                balance: user.balance
+            message: 'WhatsApp OTP verified successfully',
+            data: {
+                token,
+                refreshToken,
+                user: {
+                    id: user.id,
+                    phoneNumber: user.phoneNumber,
+                    role: user.role,
+                    name: user.name,
+                    balance: user.balance
+                }
             }
         });
 
     } catch (error) {
         console.error(error);
-        res.status(500).json({ message: 'Server Error' });
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    Email + Password 登录
+ * @route   POST /api/auth/login-email
+ */
+exports.loginWithEmail = async (req, res) => {
+    console.log('--- EMAIL LOGIN RECEIVED ---', req.body);
+    try {
+        const { email, password } = req.body;
+
+        // 验证输入
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email and password are required'
+            });
+        }
+
+        console.log('[Email Login] Looking for email:', email);
+        // 查找用户 (使用email字段)
+        const user = await User.findOne({ where: { email } });
+        console.log('[Email Login] User found:', user ? 'YES' : 'NO');
+
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid email or password'
+            });
+        }
+
+        // 验证密码
+        if (!user.password) {
+            return res.status(401).json({
+                success: false,
+                message: 'Password not set for this account. Please use OTP login.'
+            });
+        }
+
+        console.log('[Email Login] Comparing passwords...');
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        console.log('[Email Login] Password match:', isPasswordValid);
+
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid email or password'
+            });
+        }
+
+        // 检查账户状态
+        if (!user.isActive) {
+            return res.status(403).json({
+                success: false,
+                message: 'Account is inactive'
+            });
+        }
+
+        // 更新最后登录时间
+        user.lastLoginAt = new Date();
+        await user.save();
+
+        // 生成JWT token
+        const token = jwt.sign(
+            { id: user.id, phoneNumber: user.phoneNumber, role: user.role },
+            process.env.JWT_SECRET,
+            { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+        );
+
+        // 生成refresh token
+        const refreshToken = jwt.sign(
+            { id: user.id },
+            process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+            { expiresIn: '30d' }
+        );
+
+        console.log('[Email Login] Login successful for user:', user.email);
+
+        res.status(200).json({
+            success: true,
+            message: 'Login successful',
+            data: {
+                token,
+                refreshToken,
+                user: {
+                    id: user.id,
+                    phoneNumber: user.phoneNumber,
+                    email: user.email,
+                    name: user.name,
+                    role: user.role,
+                    balance: user.balance
+                }
+            }
+        });
+    } catch (error) {
+        console.error('[loginWithEmail] Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error during login'
+        });
     }
 };

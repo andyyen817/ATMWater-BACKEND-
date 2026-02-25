@@ -1,617 +1,353 @@
+const { Op } = require('sequelize');
+const sequelize = require('../config/database');
 const Unit = require('../models/Unit');
 const User = require('../models/User');
+const Transaction = require('../models/Transaction');
 
 /**
  * @desc    获取管家管理的所有设备列表
  * @route   GET /api/steward/my-units
- * @access  Private (Steward)
  */
 exports.getStewardUnits = async (req, res) => {
     try {
-        const stewardId = req.user._id;
+        const stewardId = req.user.id;
         const { status, page = 1, limit = 50 } = req.query;
 
-        console.log('[StewardUnits] 获取管家设备列表', { stewardId });
+        const where = { stewardId };
+        if (status) where.status = status;
 
-        // 构建查询条件 - 查找所有steward字段为当前用户的设备
-        const query = { steward: stewardId };
-        if (status) {
-            query.status = status;
-        }
-
-        const units = await Unit.find(query)
-            .select('unitId locationName location status sensors subscription price speed valid validDate lastHeartbeat')
-            .sort({ lastHeartbeat: -1 })
-            .limit(limit * 1)
-            .skip((page - 1) * limit)
-            .lean();
-
-        const total = await Unit.countDocuments(query);
-
-        console.log('[StewardUnits] 查询完成', {
-            stewardId,
-            count: units.length,
-            total
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+        const { count, rows } = await Unit.findAndCountAll({
+            where,
+            order: [['lastHeartbeatAt', 'DESC']],
+            limit: parseInt(limit),
+            offset
         });
 
         res.status(200).json({
             success: true,
-            data: units,
-            total,
-            pages: Math.ceil(total / limit),
+            data: rows,
+            total: count,
+            pages: Math.ceil(count / parseInt(limit)),
             currentPage: parseInt(page)
         });
-
     } catch (error) {
-        console.error('[StewardUnits] 查询异常', {
-            error: error.message,
-            stack: error.stack
-        });
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Server error'
-        });
+        console.error('[StewardUnits] Error:', error.message);
+        res.status(500).json({ success: false, message: error.message || 'Server error' });
     }
 };
 
 /**
  * @desc    获取管家管理的单个设备详情
  * @route   GET /api/steward/units/:unitId
- * @access  Private (Steward)
  */
 exports.getStewardUnitDetail = async (req, res) => {
     try {
         const { unitId } = req.params;
-        const stewardId = req.user._id;
+        const userId = req.user.id;
+        const role = req.user.role;
 
-        console.info('[StewardUnitDetail] 获取设备详情', { unitId, stewardId });
+        // 根据角色构建查询条件
+        const where = { id: unitId };
+        if (role === 'Steward') where.stewardId = userId;
 
-        // 查找设备，同时验证是否属于当前管家
-        const unit = await Unit.findOne({
-            unitId: unitId,
-            steward: stewardId
-        })
-        .select('unitId locationName location status sensors subscription price speed outlets preCash valid validDate lastHeartbeat createdAt updatedAt')
-        .lean();
-
+        const unit = await Unit.findOne({ where });
         if (!unit) {
-            console.warn('[StewardUnitDetail] 设备不存在或无权访问', { unitId, stewardId });
-            return res.status(404).json({
-                success: false,
-                message: 'Device not found or access denied'
-            });
+            return res.status(404).json({ success: false, message: 'Device not found or access denied' });
         }
 
-        // 获取设备统计信息
-        const stats = await getUnitStatistics(unit);
+        const stats = {
+            isOnline: unit.status === 'Online',
+            lastHeartbeatAgo: unit.lastHeartbeatAt
+                ? Math.floor((Date.now() - new Date(unit.lastHeartbeatAt).getTime()) / 1000 / 60)
+                : null
+        };
 
-        console.info('[StewardUnitDetail] 查询成功', { unitId });
-
-        res.status(200).json({
-            success: true,
-            data: {
-                ...unit,
-                stats
-            }
-        });
-
+        res.status(200).json({ success: true, data: { ...unit.toJSON(), stats } });
     } catch (error) {
-        console.error('[StewardUnitDetail] 查询异常', {
-            error: error.message,
-            stack: error.stack
-        });
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Server error'
-        });
+        console.error('[StewardUnitDetail] Error:', error.message);
+        res.status(500).json({ success: false, message: error.message || 'Server error' });
     }
 };
 
 /**
  * @desc    获取管家设备汇总统计
  * @route   GET /api/steward/summary
- * @access  Private (Steward)
  */
 exports.getStewardSummary = async (req, res) => {
     try {
-        const stewardId = req.user._id;
+        const stewardId = req.user.id;
 
-        console.info('[StewardSummary] 获取管家汇总统计', { stewardId });
-
-        // 获取所有管理设备的统计数据
-        const units = await Unit.find({ steward: stewardId })
-            .select('unitId status sensors subscription lastHeartbeat')
-            .lean();
-
-        const totalUnits = units.length;
-        const activeUnits = units.filter(u => u.status === 'Active').length;
-        const offlineUnits = units.filter(u => u.status === 'Offline').length;
-        const maintenanceUnits = units.filter(u => u.status === 'Maintenance').length;
-        const lockedUnits = units.filter(u => u.status === 'Locked').length;
-
-        // 订阅状态统计
-        const overdueUnits = units.filter(u => u.subscription?.isOverdue).length;
-
-        // 传感器平均数据
-        const avgSensors = {
-            pureTDS: 0,
-            rawTDS: 0,
-            ph: 0,
-            temp: 0
-        };
-
-        let validSensorCount = 0;
-        units.forEach(unit => {
-            if (unit.sensors) {
-                avgSensors.pureTDS += unit.sensors.pureTDS || 0;
-                avgSensors.rawTDS += unit.sensors.rawTDS || 0;
-                avgSensors.ph += unit.sensors.ph || 0;
-                avgSensors.temp += unit.sensors.temp || 0;
-                validSensorCount++;
-            }
+        const units = await Unit.findAll({
+            where: { stewardId },
+            attributes: ['id', 'deviceId', 'status', 'tdsValue', 'temperature', 'lastHeartbeatAt']
         });
 
-        if (validSensorCount > 0) {
-            avgSensors.pureTDS = Math.round(avgSensors.pureTDS / validSensorCount);
-            avgSensors.rawTDS = Math.round(avgSensors.rawTDS / validSensorCount);
-            avgSensors.ph = parseFloat((avgSensors.ph / validSensorCount).toFixed(1));
-            avgSensors.temp = Math.round(avgSensors.temp / validSensorCount);
+        const total = units.length;
+        const active = units.filter(u => u.status === 'Online').length;
+        const offline = units.filter(u => u.status === 'Offline').length;
+        const maintenance = units.filter(u => u.status === 'Maintenance').length;
+        const error = units.filter(u => u.status === 'Error').length;
+
+        // 传感器平均值
+        const avgSensors = { pureTDS: 0, rawTDS: 0, ph: 0, temp: 0 };
+        let sensorCount = 0;
+        units.forEach(u => {
+            if (u.tdsValue != null) {
+                avgSensors.pureTDS += u.tdsValue || 0;
+                avgSensors.temp += parseFloat(u.temperature) || 0;
+                sensorCount++;
+            }
+        });
+        if (sensorCount > 0) {
+            avgSensors.pureTDS = Math.round(avgSensors.pureTDS / sensorCount);
+            avgSensors.temp = Math.round(avgSensors.temp / sensorCount);
         }
 
-        const summary = {
-            // 设备数量统计
-            units: {
-                total: totalUnits,
-                active: activeUnits,
-                offline: offlineUnits,
-                maintenance: maintenanceUnits,
-                locked: lockedUnits
-            },
-            // 订阅统计
-            subscription: {
-                overdue: overdueUnits,
-                valid: totalUnits - overdueUnits
-            },
-            // 平均传感器数据
-            avgSensors,
-            // 最近心跳时间
-            lastHeartbeat: units.length > 0
-                ? new Date(Math.max(...units.map(u => new Date(u.lastHeartbeat || 0).getTime())))
-                : null
-        };
-
-        console.info('[StewardSummary] 查询成功', { stewardId, summary });
+        const lastHeartbeat = units.length > 0
+            ? new Date(Math.max(...units.map(u => new Date(u.lastHeartbeatAt || 0).getTime())))
+            : null;
 
         res.status(200).json({
             success: true,
-            data: summary
+            data: {
+                units: { total, active, offline, maintenance, error },
+                avgSensors,
+                lastHeartbeat
+            }
         });
-
     } catch (error) {
-        console.error('[StewardSummary] 查询异常', {
-            error: error.message,
-            stack: error.stack
-        });
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Server error'
-        });
+        console.error('[StewardSummary] Error:', error.message);
+        res.status(500).json({ success: false, message: error.message || 'Server error' });
     }
 };
 
 /**
- * @desc    管家打卡记录
+ * @desc    管家打卡 (使用 MaintenanceLog Sequelize 模型)
  * @route   POST /api/steward/checkin
- * @access  Private (Steward)
  */
 exports.stewardCheckIn = async (req, res) => {
     try {
-        const { unitId, location, photo } = req.body;
-        const stewardId = req.user._id;
+        const { unitId, latitude, longitude, photoUrl, cleaned, filterChecked, leakageChecked, tdsValue, phValue } = req.body;
+        const stewardId = req.user.id;
 
-        console.info('[StewardCheckIn] 收到打卡请求', { unitId, stewardId, location });
-
-        // 验证设备是否属于当前管家
-        const unit = await Unit.findOne({
-            unitId: unitId,
-            steward: stewardId
-        });
-
+        const unit = await Unit.findOne({ where: { stewardId, id: unitId } });
         if (!unit) {
-            console.warn('[StewardCheckIn] 设备不存在或无权访问', { unitId, stewardId });
-            return res.status(404).json({
-                success: false,
-                message: 'Device not found or access denied'
-            });
+            return res.status(404).json({ success: false, message: 'Device not found or access denied' });
         }
 
-        // 验证位置距离（可选，如果需要严格的位置验证）
-        if (location && unit.location && unit.location.coordinates) {
-            const distance = calculateDistance(
-                location.lat,
-                location.lng,
-                unit.location.coordinates[1],
-                unit.location.coordinates[0]
-            );
-
-            // 允许500米的误差范围
-            if (distance > 500) {
-                console.warn('[StewardCheckIn] 位置距离过远', {
-                    unitId,
-                    distance,
-                    maxAllowed: 500
-                });
-                return res.status(400).json({
-                    success: false,
-                    message: 'Location too far from device'
-                });
-            }
-
-            console.info('[StewardCheckIn] 位置验证通过', { unitId, distance });
-        }
-
-        // 更新设备最后心跳时间
-        unit.lastHeartbeat = new Date();
-        await unit.save();
-
-        // 记录打卡历史到数据库
-        const CheckIn = require('../models/CheckIn');
-        const User = require('../models/User');
-
-        // 获取管家信息
-        const steward = await User.findById(stewardId).select('name phoneNumber');
-
-        // 计算距离
-        let distance = 0;
-        let deviceLocation = null;
-        if (location && unit.location && unit.location.coordinates) {
-            distance = calculateDistance(
-                location.lat,
-                location.lng,
-                unit.location.coordinates[1],
-                unit.location.coordinates[0]
-            );
-            deviceLocation = {
-                lat: unit.location.coordinates[1],
-                lng: unit.location.coordinates[0]
-            };
-        }
-
-        // 创建打卡记录
-        const checkInRecord = await CheckIn.create({
+        const MaintenanceLog = require('../models/MaintenanceLog.sequelize');
+        const log = await MaintenanceLog.create({
+            unitId: unit.id,
+            deviceId: unit.deviceId,
             stewardId,
-            stewardName: steward?.name || '',
-            stewardPhone: steward?.phoneNumber || '',
-            unitId: unit.unitId,
-            unitName: unit.locationName || unit.unitId,
-            location: {
-                submitted: location,
-                device: deviceLocation,
-                verified: distance <= 500,
-                distance: Math.round(distance)
-            },
-            photo: photo || null,
-            unitSnapshot: {
-                status: unit.status,
-                sensors: unit.sensors || {},
-                subscription: unit.subscription || {}
-            },
-            status: distance <= 500 ? 'verified' : 'failed'
+            latitude, longitude,
+            photoUrl: photoUrl || '',
+            cleaned: cleaned || false,
+            filterChecked: filterChecked || false,
+            leakageChecked: leakageChecked || false,
+            tdsValue, phValue,
+            status: 'Verified'
         });
 
-        console.info('[StewardCheckIn] 打卡成功', {
-            unitId,
-            stewardId,
-            checkInId: checkInRecord._id,
-            distance
-        });
+        await unit.update({ lastMaintenanceAt: new Date() });
 
-        res.status(200).json({
-            success: true,
-            message: 'Check-in successful',
-            data: {
-                unitId: unit.unitId,
-                locationName: unit.locationName,
-                checkInTime: checkInRecord.createdAt,
-                location: location,
-                verified: distance <= 500,
-                distance: Math.round(distance),
-                checkInId: checkInRecord._id
-            }
-        });
-
+        res.status(200).json({ success: true, message: 'Check-in successful', data: log });
     } catch (error) {
-        console.error('[StewardCheckIn] 打卡异常', {
-            error: error.message,
-            stack: error.stack
-        });
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Server error'
-        });
+        console.error('[StewardCheckIn] Error:', error.message);
+        res.status(500).json({ success: false, message: error.message || 'Server error' });
     }
 };
 
 /**
  * @desc    获取设备水质历史数据
  * @route   GET /api/steward/units/:unitId/water-quality
- * @access  Private (Steward)
  */
 exports.getStewardUnitWaterQuality = async (req, res) => {
     try {
         const { unitId } = req.params;
         const { days = 7 } = req.query;
-        const stewardId = req.user._id;
 
-        console.info('[StewardUnitWaterQuality] 获取水质历史', { unitId, stewardId, days });
-
-        // 验证设备权限
-        const unit = await Unit.findOne({
-            unitId: unitId,
-            steward: stewardId
-        });
-
+        const unit = await Unit.findByPk(unitId);
         if (!unit) {
-            return res.status(404).json({
-                success: false,
-                message: 'Device not found or access denied'
-            });
+            return res.status(404).json({ success: false, message: 'Device not found' });
         }
 
-        // 获取水质历史记录
-        const WaterQualityLog = require('../models/WaterQualityLog');
+        const WaterQualityLog = require('../models/WaterQualityLog.sequelize');
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - parseInt(days));
 
-        const logs = await WaterQualityLog.find({
-            unitId: unit._id,
-            createdAt: { $gte: startDate }
-        })
-        .sort({ createdAt: 1 })
-        .lean();
+        const logs = await WaterQualityLog.findAll({
+            where: {
+                unitId: unit.id,
+                createdAt: { [Op.gte]: startDate }
+            },
+            order: [['createdAt', 'ASC']]
+        });
 
-        // 格式化数据用于图表展示
         const chartData = logs.map(log => ({
             timestamp: log.createdAt,
-            pureTDS: log.pureTDS,
-            rawTDS: log.rawTDS,
-            ph: log.ph,
-            temperature: log.temperature
+            pureTDS: log.pureTds,
+            rawTDS: log.rawTds,
+            ph: parseFloat(log.ph),
+            temperature: parseFloat(log.temperature)
         }));
 
-        // 计算统计数据
-        const stats = {
-            avgPureTDS: 0,
-            maxPureTDS: 0,
-            minPureTDS: 999999,
-            avgPH: 0,
-            dataPoints: logs.length
-        };
-
+        const stats = { avgPureTDS: 0, maxPureTDS: 0, minPureTDS: 0, avgPH: 0, dataPoints: logs.length };
         if (logs.length > 0) {
-            const pureTDSValues = logs.map(l => l.pureTDS);
-            stats.avgPureTDS = Math.round(pureTDSValues.reduce((a, b) => a + b, 0) / logs.length);
-            stats.maxPureTDS = Math.max(...pureTDSValues);
-            stats.minPureTDS = Math.min(...pureTDSValues);
-            stats.avgPH = parseFloat((logs.map(l => l.ph).reduce((a, b) => a + b, 0) / logs.length).toFixed(1));
+            const vals = logs.map(l => l.pureTds || 0);
+            stats.avgPureTDS = Math.round(vals.reduce((a, b) => a + b, 0) / logs.length);
+            stats.maxPureTDS = Math.max(...vals);
+            stats.minPureTDS = Math.min(...vals);
+            stats.avgPH = parseFloat((logs.map(l => parseFloat(l.ph) || 0).reduce((a, b) => a + b, 0) / logs.length).toFixed(1));
         }
-
-        console.info('[StewardUnitWaterQuality] 查询成功', {
-            unitId,
-            dataPoints: logs.length
-        });
 
         res.status(200).json({
             success: true,
-            data: {
-                chartData,
-                stats,
-                unitId: unit.unitId,
-                locationName: unit.locationName
-            }
+            data: { chartData, stats, deviceId: unit.deviceId, location: unit.location }
         });
-
     } catch (error) {
-        console.error('[StewardUnitWaterQuality] 查询异常', {
-            error: error.message,
-            stack: error.stack
-        });
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Server error'
-        });
+        console.error('[StewardUnitWaterQuality] Error:', error.message);
+        res.status(500).json({ success: false, message: error.message || 'Server error' });
     }
 };
 
-// ==================== 辅助函数 ====================
-
 /**
- * 计算两个经纬度坐标之间的距离（米）
- * 使用 Haversine 公式
- */
-function calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371e3; // 地球半径（米）
-    const φ1 = lat1 * Math.PI / 180;
-    const φ2 = lat2 * Math.PI / 180;
-    const Δφ = (lat2 - lat1) * Math.PI / 180;
-    const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-        Math.cos(φ1) * Math.cos(φ2) *
-        Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c;
-}
-
-/**
- * 获取设备统计信息
- */
-async function getUnitStatistics(unit) {
-    // 这里可以添加更多统计信息的计算
-    // 例如：今日打水量、本周收入等
-
-    return {
-        // 基础状态
-        isOnline: unit.status === 'Active',
-        lastHeartbeatAgo: unit.lastHeartbeat
-            ? Math.floor((Date.now() - new Date(unit.lastHeartbeat).getTime()) / 1000 / 60) // 分钟
-            : null,
-
-        // 传感器状态
-        sensorStatus: {
-            tdsNormal: (!unit.sensors || unit.sensors.pureTDS < 100),
-            phNormal: (!unit.sensors || unit.sensors.ph >= 6.5 && unit.sensors.ph <= 8.5),
-            tempNormal: (!unit.sensors || unit.sensors.temp >= 15 && unit.sensors.temp <= 35)
-        },
-
-        // 订阅状态
-        subscriptionStatus: {
-            isOverdue: unit.subscription?.isOverdue || false,
-            overdueDays: unit.subscription?.overdueDays || 0
-        }
-    };
-}
-
-/**
- * @desc    获取管家打卡历史记录
+ * @desc    获取管家打卡历史记录 (使用 MaintenanceLog)
  * @route   GET /api/steward/checkin-history
- * @access  Private (Steward)
  */
 exports.getStewardCheckInHistory = async (req, res) => {
     try {
-        const stewardId = req.user._id;
-        const { page = 1, limit = 20, unitId, startDate, endDate } = req.query;
+        const stewardId = req.user.id;
+        const { page = 1, limit = 20 } = req.query;
 
-        console.info('[StewardCheckInHistory] 查询打卡历史', { stewardId, unitId, startDate, endDate });
+        const MaintenanceLog = require('../models/MaintenanceLog.sequelize');
+        const offset = (parseInt(page) - 1) * parseInt(limit);
 
-        const CheckIn = require('../models/CheckIn');
-
-        // 构建查询条件
-        const query = { stewardId };
-        if (unitId) query.unitId = unitId;
-
-        // 日期范围过滤
-        if (startDate || endDate) {
-            query.createdAt = {};
-            if (startDate) query.createdAt.$gte = new Date(startDate);
-            if (endDate) query.createdAt.$lte = new Date(endDate);
-        }
-
-        const checkIns = await CheckIn.find(query)
-            .sort({ createdAt: -1 })
-            .limit(limit * 1)
-            .skip((page - 1) * limit)
-            .lean();
-
-        const total = await CheckIn.countDocuments(query);
-
-        console.info('[StewardCheckInHistory] 查询完成', {
-            stewardId,
-            count: checkIns.length,
-            total
+        const { count, rows } = await MaintenanceLog.findAndCountAll({
+            where: { stewardId },
+            order: [['createdAt', 'DESC']],
+            limit: parseInt(limit),
+            offset
         });
 
         res.status(200).json({
             success: true,
-            data: checkIns,
-            total,
-            pages: Math.ceil(total / limit),
+            data: rows,
+            total: count,
+            pages: Math.ceil(count / parseInt(limit)),
             currentPage: parseInt(page)
         });
-
     } catch (error) {
-        console.error('[StewardCheckInHistory] 查询异常', {
-            error: error.message,
-            stack: error.stack
-        });
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Server error'
-        });
+        console.error('[StewardCheckInHistory] Error:', error.message);
+        res.status(500).json({ success: false, message: error.message || 'Server error' });
     }
 };
 
 /**
  * @desc    获取管家打卡统计
  * @route   GET /api/steward/checkin-statistics
- * @access  Private (Steward)
  */
 exports.getStewardCheckInStatistics = async (req, res) => {
     try {
-        const stewardId = req.user._id;
-        const { unitId, startDate, endDate } = req.query;
+        const stewardId = req.user.id;
+        const MaintenanceLog = require('../models/MaintenanceLog.sequelize');
 
-        console.info('[StewardCheckInStatistics] 查询打卡统计', { stewardId, unitId, startDate, endDate });
-
-        const CheckIn = require('../models/CheckIn');
-
-        const stats = await CheckIn.getCheckInStatistics(
-            unitId ? null : stewardId,
-            startDate,
-            endDate
-        );
-
-        console.info('[StewardCheckInStatistics] 查询成功', { stewardId, stats });
+        const [total, verified, pending, rejected] = await Promise.all([
+            MaintenanceLog.count({ where: { stewardId } }),
+            MaintenanceLog.count({ where: { stewardId, status: 'Verified' } }),
+            MaintenanceLog.count({ where: { stewardId, status: 'Pending' } }),
+            MaintenanceLog.count({ where: { stewardId, status: 'Rejected' } })
+        ]);
 
         res.status(200).json({
             success: true,
-            data: stats
+            data: { totalCount: total, verifiedCount: verified, pendingCount: pending, rejectedCount: rejected }
         });
-
     } catch (error) {
-        console.error('[StewardCheckInStatistics] 查询异常', {
-            error: error.message,
-            stack: error.stack
-        });
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Server error'
-        });
+        console.error('[StewardCheckInStatistics] Error:', error.message);
+        res.status(500).json({ success: false, message: error.message || 'Server error' });
     }
 };
 
 /**
  * @desc    获取单次打卡详情
  * @route   GET /api/steward/checkin/:id
- * @access  Private (Steward)
  */
 exports.getCheckInDetail = async (req, res) => {
     try {
         const { id } = req.params;
-        const stewardId = req.user._id;
+        const stewardId = req.user.id;
+        const MaintenanceLog = require('../models/MaintenanceLog.sequelize');
 
-        console.info('[StewardCheckInDetail] 查询打卡详情', { id, stewardId });
-
-        const CheckIn = require('../models/CheckIn');
-
-        const checkIn = await CheckIn.findOne({
-            _id: id,
-            stewardId: stewardId
-        });
-
-        if (!checkIn) {
-            return res.status(404).json({
-                success: false,
-                message: 'Check-in record not found'
-            });
+        const log = await MaintenanceLog.findOne({ where: { id, stewardId } });
+        if (!log) {
+            return res.status(404).json({ success: false, message: 'Check-in record not found' });
         }
 
-        console.info('[StewardCheckInDetail] 查询成功', { id });
+        res.status(200).json({ success: true, data: log });
+    } catch (error) {
+        console.error('[StewardCheckInDetail] Error:', error.message);
+        res.status(500).json({ success: false, message: error.message || 'Server error' });
+    }
+};
+
+/**
+ * @desc    获取管家收入汇总
+ * @route   GET /api/steward/revenue-summary
+ */
+exports.getStewardRevenueSummary = async (req, res) => {
+    try {
+        const stewardId = req.user.id;
+        const { year, month } = req.query;
+
+        const now = new Date();
+        const y = parseInt(year) || now.getFullYear();
+        const m = parseInt(month) || (now.getMonth() + 1);
+        const startDate = new Date(y, m - 1, 1);
+        const endDate = new Date(y, m, 0, 23, 59, 59);
+
+        // 获取管家名下所有设备
+        const units = await Unit.findAll({ where: { stewardId }, attributes: ['id', 'deviceId'] });
+        const unitIds = units.map(u => u.id);
+
+        let totalRevenue = 0;
+        let totalVolume = 0;
+        let transactionCount = 0;
+
+        if (unitIds.length > 0) {
+            const result = await Transaction.findAll({
+                where: {
+                    unitId: { [Op.in]: unitIds },
+                    type: 'WaterPurchase',
+                    status: 'Completed',
+                    createdAt: { [Op.between]: [startDate, endDate] }
+                },
+                attributes: [
+                    [sequelize.fn('SUM', sequelize.col('amount')), 'totalAmount'],
+                    [sequelize.fn('SUM', sequelize.col('volume')), 'totalVolume'],
+                    [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+                ],
+                raw: true
+            });
+
+            if (result[0]) {
+                totalRevenue = parseFloat(result[0].totalAmount) || 0;
+                totalVolume = parseFloat(result[0].totalVolume) || 0;
+                transactionCount = parseInt(result[0].count) || 0;
+            }
+        }
 
         res.status(200).json({
             success: true,
-            data: checkIn
+            data: {
+                year: y, month: m,
+                totalRevenue, totalVolume, transactionCount,
+                unitCount: units.length
+            }
         });
-
     } catch (error) {
-        console.error('[StewardCheckInDetail] 查询异常', {
-            error: error.message,
-            stack: error.stack
-        });
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Server error'
-        });
+        console.error('[StewardRevenueSummary] Error:', error.message);
+        res.status(500).json({ success: false, message: error.message || 'Server error' });
     }
 };

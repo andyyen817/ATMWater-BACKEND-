@@ -8,69 +8,27 @@ const {
     getStewardUnitWaterQuality,
     getStewardCheckInHistory,
     getStewardCheckInStatistics,
-    getCheckInDetail
+    getCheckInDetail,
+    getStewardRevenueSummary
 } = require('../controllers/stewardController');
 const { protect, authorize } = require('../middleware/authMiddleware');
-const logger = require('../utils/logger');
 
-// 所有管家路由都需要登录且角色为Steward
+// 所有路由都需要登录
 router.use(protect);
-router.use(authorize('Steward'));
 
-/**
- * @desc    获取管家设备汇总统计
- * @route   GET /api/steward/summary
- * @access  Private (Steward)
- */
-router.get('/summary', getStewardSummary);
+// 管家汇总和设备列表 - 允许 Steward, RP, Super-Admin, GM 访问
+router.get('/summary', authorize('Steward', 'RP', 'Super-Admin', 'GM'), getStewardSummary);
+router.get('/my-units', authorize('Steward', 'RP', 'Super-Admin', 'GM'), getStewardUnits);
+router.get('/units/:unitId', authorize('Steward', 'RP', 'Super-Admin', 'GM'), getStewardUnitDetail);
+router.get('/units/:unitId/water-quality', authorize('Steward', 'RP', 'Super-Admin', 'GM'), getStewardUnitWaterQuality);
 
-/**
- * @desc    获取管家管理的所有设备列表
- * @route   GET /api/steward/my-units
- * @access  Private (Steward)
- */
-router.get('/my-units', getStewardUnits);
+// 收入汇总 - 仅 Steward
+router.get('/revenue-summary', authorize('Steward'), getStewardRevenueSummary);
 
-/**
- * @desc    获取管家管理的单个设备详情
- * @route   GET /api/steward/units/:unitId
- * @access  Private (Steward)
- */
-router.get('/units/:unitId', getStewardUnitDetail);
-
-/**
- * @desc    获取设备水质历史数据
- * @route   GET /api/steward/units/:unitId/water-quality
- * @access  Private (Steward)
- */
-router.get('/units/:unitId/water-quality', getStewardUnitWaterQuality);
-
-/**
- * @desc    管家打卡记录
- * @route   POST /api/steward/checkin
- * @access  Private (Steward)
- */
-router.post('/checkin', stewardCheckIn);
-
-/**
- * @desc    获取管家打卡历史记录
- * @route   GET /api/steward/checkin-history
- * @access  Private (Steward)
- */
-router.get('/checkin-history', getStewardCheckInHistory);
-
-/**
- * @desc    获取管家打卡统计
- * @route   GET /api/steward/checkin-statistics
- * @access  Private (Steward)
- */
-router.get('/checkin-statistics', getStewardCheckInStatistics);
-
-/**
- * @desc    获取单次打卡详情
- * @route   GET /api/steward/checkin/:id
- * @access  Private (Steward)
- */
-router.get('/checkin/:id', getCheckInDetail);
+// 打卡相关 - 仅 Steward
+router.post('/checkin', authorize('Steward'), stewardCheckIn);
+router.get('/checkin-history', authorize('Steward'), getStewardCheckInHistory);
+router.get('/checkin-statistics', authorize('Steward'), getStewardCheckInStatistics);
+router.get('/checkin/:id', authorize('Steward'), getCheckInDetail);
 
 module.exports = router;

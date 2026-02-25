@@ -66,18 +66,36 @@ exports.createTopUp = async (req, res) => {
  */
 exports.getBalance = async (req, res) => {
     try {
-        const user = await User.findByPk(req.user.id);
+        const user = await User.findByPk(req.user.id, {
+            attributes: ['id', 'balance', 'phone', 'name']
+        });
+
         if (!user) {
-            return res.status(404).json({ success: false, message: 'User not found' });
+            console.error(`[Wallet Balance] User not found: ${req.user.id}`);
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
         }
 
         const balance = parseFloat(user.balance) || 0;
-        console.log('[Wallet Balance] User balance:', balance);
 
-        return res.status(200).json({ success: true, balance: balance });
+        console.log(`[Wallet Balance] User ${req.user.id} (${user.phone}) balance: ${balance}`);
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                balance: balance,
+                currency: 'IDR'
+            }
+        });
     } catch (error) {
-        console.error('[Wallet Balance] Error:', error);
-        res.status(500).json({ success: false, message: 'Server Error' });
+        console.error('[Wallet Balance] Error:', error.message, error.stack);
+        res.status(500).json({
+            success: false,
+            message: 'Server Error',
+            error: error.message
+        });
     }
 };
 

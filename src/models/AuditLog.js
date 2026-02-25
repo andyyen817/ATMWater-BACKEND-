@@ -1,38 +1,55 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
 
-const auditLogSchema = new mongoose.Schema({
-    userId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
+const AuditLog = sequelize.define('AuditLog', {
+    id: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true
     },
-    userName: String,
-    userRole: String,
+    userId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: {
+            model: 'users',
+            key: 'id'
+        }
+    },
+    userName: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    userRole: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
     module: {
-        type: String, // e.g., 'Settings', 'Withdrawals', 'Units', 'Partners'
-        required: true
+        type: DataTypes.STRING,
+        allowNull: false,
+        comment: 'e.g., Settings, Withdrawals, Units, Partners'
     },
     action: {
-        type: String, // e.g., 'UPDATE_PRICE', 'APPROVE_WITHDRAWAL', 'LOCK_DEVICE'
-        required: true
+        type: DataTypes.STRING,
+        allowNull: false,
+        comment: 'e.g., UPDATE_PRICE, APPROVE_WITHDRAWAL, LOCK_DEVICE'
     },
     details: {
-        type: mongoose.Schema.Types.Mixed // 记录修改前后的值，或操作备注
+        type: DataTypes.JSON,
+        allowNull: true,
+        comment: '记录修改前后的值，或操作备注'
     },
-    ipAddress: String,
+    ipAddress: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
     status: {
-        type: String,
-        enum: ['Success', 'Failed'],
-        default: 'Success'
+        type: DataTypes.ENUM('Success', 'Failed'),
+        defaultValue: 'Success'
     }
 }, {
+    tableName: 'audit_logs',
     timestamps: true
 });
-
-// 设置日志保留 90 天，过期自动清理 (TTL)
-auditLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 7776000 });
-
-const AuditLog = mongoose.model('AuditLog', auditLogSchema);
 
 module.exports = AuditLog;
 

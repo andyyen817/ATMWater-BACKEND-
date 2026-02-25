@@ -8,16 +8,22 @@ const { Op } = require('sequelize');
  */
 exports.getPartnerTree = async (req, res) => {
     try {
-        // 1. 获取所有 RP
+        // 如果是 RP 角色，只返回自己的子树
+        let rpWhere = { role: 'RP' };
+        if (req.user.role === 'RP') {
+            rpWhere.id = req.user.id;
+        }
+
+        // 1. 获取 RP
         const rps = await User.findAll({
-            where: { role: 'RP' },
+            where: rpWhere,
             attributes: ['id', 'name', 'phoneNumber', 'balance']
         });
 
         const partnerTree = await Promise.all(rps.map(async (rp) => {
             // 2. 获取该 RP 旗下的所有设备，用于统计
             const units = await Unit.findAll({
-                where: { rpOwner: rp.id }
+                where: { rpOwnerId: rp.id }
             });
 
             // 3. 获取该 RP 管理的所有管家
@@ -32,7 +38,7 @@ exports.getPartnerTree = async (req, res) => {
             // 4. 为每个管家统计数据
             const stewardDetails = await Promise.all(stewards.map(async (steward) => {
                 const managedUnits = await Unit.findAll({
-                    where: { steward: steward.id },
+                    where: { stewardId: steward.id },
                     attributes: ['id', 'deviceId', 'location']
                 });
 
@@ -138,8 +144,8 @@ exports.unbindSteward = async (req, res) => {
 
         // 同时解除该管家负责的所有设备关联
         await Unit.update(
-            { steward: null },
-            { where: { steward: stewardId } }
+            { stewardId: null },
+            { where: { stewardId: stewardId } }
         );
 
         res.status(200).json({

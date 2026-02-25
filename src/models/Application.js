@@ -1,62 +1,55 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
 
-const applicationSchema = new mongoose.Schema({
-    applicant: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
+const Application = sequelize.define('Application', {
+    id: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true
+    },
+    applicantId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: {
+            model: 'users',
+            key: 'id'
+        }
     },
     type: {
-        type: String,
-        enum: ['Steward', 'RP', 'Super-Admin'],
-        required: true
+        type: DataTypes.ENUM('Steward', 'RP', 'Super-Admin'),
+        allowNull: false
     },
     status: {
-        type: String,
-        enum: ['Pending', 'Reviewing', 'Approved', 'Rejected'],
-        default: 'Pending'
+        type: DataTypes.ENUM('Pending', 'Reviewing', 'Approved', 'Rejected'),
+        defaultValue: 'Pending'
     },
-    // 申请资料
+    // 申请资料 (JSON)
     documents: {
-        idCardUrl: String,      // 身份证照片
-        salaryProofUrl: String, // 薪资证明 (针对 RP)
-        businessLicenseUrl: String, // 营业执照 (针对 RP)
-        additionalInfo: String  // 自述或其他补充
+        type: DataTypes.JSON,
+        defaultValue: {}
     },
-    // 审批流记录
+    // 审批流记录 (JSON)
     approvals: {
-        businessApproval: {
-            status: { type: String, enum: ['Pending', 'Approved', 'Rejected'], default: 'Pending' },
-            adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-            comment: String,
-            updatedAt: Date
-        },
-        rpApproval: { // 仅针对 Steward 申请，由所在区域 RP 审批
-            status: { type: String, enum: ['Pending', 'Approved', 'Rejected'], default: 'Pending' },
-            rpId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-            comment: String,
-            updatedAt: Date
-        },
-        gmApproval: { // 仅针对 RP 申请，由总经理最终审批
-            status: { type: String, enum: ['Pending', 'Approved', 'Rejected'], default: 'Pending' },
-            adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-            comment: String,
-            updatedAt: Date
-        },
-        superAdminApproval: { // 仅针对 Super-Admin 申请，由现有 Super-Admin 审批
-            status: { type: String, enum: ['Pending', 'Approved', 'Rejected'], default: 'Pending' },
-            adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-            comment: String,
-            updatedAt: Date
+        type: DataTypes.JSON,
+        defaultValue: {
+            businessApproval: { status: 'Pending' },
+            rpApproval: { status: 'Pending' },
+            gmApproval: { status: 'Pending' },
+            superAdminApproval: { status: 'Pending' }
         }
     },
     // 线下面谈/考核记录
-    assessmentNotes: String,
-    rejectionReason: String
+    assessmentNotes: {
+        type: DataTypes.TEXT,
+        allowNull: true
+    },
+    rejectionReason: {
+        type: DataTypes.TEXT,
+        allowNull: true
+    }
 }, {
+    tableName: 'applications',
     timestamps: true
 });
-
-const Application = mongoose.model('Application', applicationSchema);
 
 module.exports = Application;

@@ -77,10 +77,23 @@ const User = sequelize.define('User', {
   
   // ========== 状态字段 ==========
   role: {
-    type: DataTypes.ENUM('User', 'Admin', 'Steward'),
+    type: DataTypes.ENUM('User', 'Admin', 'Steward', 'RP', 'GM', 'Finance', 'Business', 'AfterSales', 'Super-Admin'),
     defaultValue: 'User',
     allowNull: false,
     comment: '用户角色'
+  },
+
+  // ========== 合作伙伴层级 ==========
+  managedBy: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: '上级 RP 的用户 ID（仅 Steward 使用）',
+    references: {
+      model: 'users',
+      key: 'id'
+    },
+    onUpdate: 'CASCADE',
+    onDelete: 'SET NULL'
   },
   
   isActive: {
@@ -155,7 +168,7 @@ User.beforeCreate(async (user) => {
   
   // 自动生成推荐码
   if (!user.referralCode) {
-    user.referralCode = `REF_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+    user.referralCode = `R${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
   }
 });
 

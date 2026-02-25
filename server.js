@@ -703,6 +703,29 @@ app.use('/api/users', require('./src/routes/userRoutes'));
 app.use('/api/dashboard', require('./src/routes/dashboardRoutes'));
 app.use('/api/admin', require('./src/routes/adminRoutes'));
 app.use('/api/partners', require('./src/routes/partnerRoutes'));
+app.use('/api/steward', require('./src/routes/stewardRoutes'));
+app.use('/api/rp', require('./src/routes/rpRoutes'));
+
+// 添加缺失的路由
+app.use('/api/applications', require('./src/routes/applicationRoutes'));
+app.use('/api/finance', require('./src/routes/financeRoutes'));
+app.use('/api/settings', require('./src/routes/settingRoutes'));
+
+// ========================================
+// Profit Sharing Routes (新分润系统)
+// ========================================
+app.use('/api/profit-sharing', require('./src/routes/profitSharingRoutes'));
+
+// ========================================
+// 404 Handler - 返回JSON而不是HTML
+// ========================================
+app.use((req, res, next) => {
+    res.status(404).json({
+        success: false,
+        message: `Cannot ${req.method} ${req.path}`,
+        error: 'Endpoint not found'
+    });
+});
 
 // ========================================
 // Error Handler
@@ -745,6 +768,11 @@ const startServer = async () => {
         // 4. 启动 TCP 服务器
         const tcpServer = require('./src/services/tcpServer');
         tcpServer.start();
+
+        // 5. 启动定时任务（分润系统）
+        require('./src/jobs/monthlyResetJob');
+        require('./src/jobs/dailyAlertJob');
+        console.log('[Jobs] ✅ Scheduled jobs initialized');
 
         // 5. 优雅关闭
         process.on('SIGTERM', async () => {

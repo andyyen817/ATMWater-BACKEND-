@@ -1,4 +1,6 @@
-const { User, Transaction } = require('../models'); // Stage 1 修复：使用 Sequelize 模型
+const { User, Transaction, PhysicalCard } = require('../models'); // Stage 1 修复：使用 Sequelize 模型
+const UserLog = require('../models/UserLog');
+const { logAction } = require('../utils/logger');
 // ❌ RenrenCard 已删除（阶段0：清理人人水站功能）
 // const RenrenCard = require('../models/RenrenCard');
 // ❌ renrenWaterService 已删除（阶段0：清理人人水站功能）
@@ -11,54 +13,34 @@ const { Op } = require('sequelize');
  */
 exports.getUserCards = async (req, res) => {
     try {
-        // 查找与当前用户关联的所有卡片
-        const cards = await RenrenCard.findAll({ where: { localUserId: req.user.id } });
+        // Find all physical cards belonging to the current user
+        const cards = await PhysicalCard.findAll({
+            where: { userId: req.user.id },
+            order: [['createdAt', 'ASC']]
+        });
 
-        // 实时从人人水站同步卡片余额
-        const cardsWithBalance = await Promise.all(cards.map(async (card) => {
-            try {
-                const cardInfo = await renrenWaterService.getCardInfo(card.cardNo);
-
-                // 打印完整的API返回数据用于调试
-                console.log(`[UserCards] API response for card ${card.cardNo}:`, JSON.stringify(cardInfo, null, 2));
-
-                if (cardInfo.success && cardInfo.code === 0) {
-                    card.balance = cardInfo.result.balance;
-                    card.realBalance = cardInfo.result.real_balance;
-                    card.presentCash = cardInfo.result.present_cash || 0;
-                    // 尝试多种可能的字段名
-                    card.unsyncCash = cardInfo.result.unsync_cash || cardInfo.result.unsyncCash || cardInfo.result.pending_cash || 0;
-                    card.valid = cardInfo.result.valid;
-                    card.userName = cardInfo.result.user_name || card.userName;
-                    card.userPhone = cardInfo.result.user_phone || card.userPhone;
-                    card.lastSyncTime = new Date();
-                    await card.save();
-
-                    console.log(`[UserCards] Card ${card.cardNo} updated - unsyncCash:`, card.unsyncCash);
-                }
-            } catch (error) {
-                console.error(`[UserCards] Failed to sync card ${card.cardNo}:`, error.message);
-            }
-
-            return {
-                cardNo: card.cardNo,
-                balance: card.balance,
-                realBalance: card.realBalance,
-                presentCash: card.presentCash,
-                unsyncCash: card.unsyncCash || 0,
-                valid: card.valid,
-                isBlack: card.isBlack,
-                userName: card.userName,
-                userPhone: card.userPhone,
-                lastSyncTime: card.lastSyncTime,
-                boundEcardNo: card.boundEcardNo || '' // 绑定的实物水卡号
-            };
+        // Format response
+        const formattedCards = cards.map(card => ({
+            id: card.id,
+            rfid: card.rfid,
+            status: card.status,
+            activatedAt: card.activatedAt,
+            boundAt: card.boundAt,
+            batchId: card.batchId
         }));
 
-        res.status(200).json({ success: true, data: cardsWithBalance });
+        res.status(200).json({
+            success: true,
+            count: formattedCards.length,
+            data: formattedCards
+        });
     } catch (error) {
-        console.error('[UserCards] Error:', error.message);
-        res.status(500).json({ success: false, message: 'Server Error' });
+        console.error('[getUserCards] Error:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve cards',
+            error: error.message
+        });
     }
 };
 
@@ -251,5 +233,62 @@ exports.deleteAddress = async (req, res) => {
         res.status(200).json({ success: true, data: user.shippingAddresses });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    上传用户日志
+ * @route   POST /api/users/logs/upload
+ */
+exports.uploadUserLog = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { logs, deviceInfo, appVersion } = req.body;
+
+        // 验证必填字段
+        if (!logs) {
+            return res.status(400).json({
+                success: false,
+                message: 'Logs are required'
+            });
+        }
+
+        // 创建UserLog记录
+        const userLog = await UserLog.create({
+            userId,
+            logs: typeof logs === 'string' ? logs : JSON.stringify(logs),
+            deviceInfo: deviceInfo ? JSON.stringify(deviceInfo) : null,
+            appVersion,
+            uploadedAt: new Date()
+        });
+
+        // 记录审计日志
+        await logAction(
+            userId,
+            req.user.name || req.user.phoneNumber,
+            req.user.role || 'user',
+            'user',
+            'upload_log',
+            {
+                logId: userLog.id,
+                logCount: Array.isArray(logs) ? logs.length : 1,
+                appVersion
+            },
+            req.ip,
+            'success'
+        );
+
+        res.status(201).json({
+            success: true,
+            data: { logId: userLog.id },
+            message: 'Log uploaded successfully'
+        });
+    } catch (error) {
+        console.error('[uploadUserLog] Error:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to upload log',
+            error: error.message
+        });
     }
 };

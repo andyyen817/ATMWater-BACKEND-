@@ -6,8 +6,8 @@ const { User, Unit, Transaction } = require('../models'); // Stage 1 修复：�
 // const RenrenTransaction = require('../models/RenrenTransaction');
 const { verifySignature } = require('../utils/signature');
 const hardwareService = require('../services/hardwareService');
-// ❌ sharingService 暂时注释（依赖 Setting 模型，待迁移）
-// const { processProfitSharing } = require('../services/sharingService');
+// ❌ sharingService 已迁移到 newSharingEngine
+const { processProfitSharing } = require('../services/profitSharing/newSharingEngine');
 
 /**
  * @desc    下发取水授权指令 (由 App 触发)
@@ -48,6 +48,8 @@ exports.authorizeDispense = async (req, res) => {
         // 创建 Pending 交易记录
         await Transaction.create({
             userId,
+            unitId: unit.id,
+            deviceId: unit.deviceId,
             type: 'WaterPurchase',
             amount: cash,
             externalId: out_trade_no,
@@ -146,21 +148,31 @@ async function handleCardWaterDispense(data) {
         remark: 'Card Water Dispense'
     });
 
-    // 3. 如果卡片关联了本地用户，更新用户余额并创建本地交易
-    if (card && card.localUserId) {
-        const user = await User.findByPk(card.localUserId);
-        if (user) {
-            await user.update({ balance: end_balance });
+    // 3. 查找水站并创建本地交易记录（用于分润）
+    const unit = await Unit.findOne({ where: { deviceId: device_no } });
 
-            await Transaction.create({
-                userId: user.id,
-                type: 'WaterPurchase',
-                amount: cash,
-                status: 'Completed',
-                volume: volume,
-                description: `Card Water Purchase at ${device_no}`
-            });
+    if (unit) {
+        // 确定用户：优先用卡片关联用户，否则用系统用户1
+        let userId = (card && card.localUserId) ? card.localUserId : 1;
+
+        if (card && card.localUserId) {
+            const user = await User.findByPk(card.localUserId);
+            if (user) await user.update({ balance: end_balance });
         }
+
+        const tx = await Transaction.create({
+            userId,
+            unitId: unit.id,
+            deviceId: device_no,
+            type: 'WaterPurchase',
+            amount: cash,
+            status: 'Completed',
+            volume: volume,
+            description: `Card Water Purchase at ${device_no}`
+        });
+
+        // 触发分润
+        await processProfitSharing(tx);
     }
 }
 
@@ -172,17 +184,21 @@ async function handleCoinWaterDispense(data) {
 
     console.log(`[Callback] Coin Water Dispense: ${device_no}, ${volume}ml, Rp ${cash}`);
 
-    // 保存投币打水记录（无卡片信息）
-    await RenrenTransaction.create({
-        deviceNo: device_no,
-        tradeType: 2, // 投币打水
-        cash: cash,
-        volume: volume,
-        price: price,
-        outlet: outlet,
-        waterTime: new Date(water_time),
-        remark: 'Coin Water Dispense'
-    });
+    // 查找水站并创建本地交易记录（用于分润）
+    const unit = await Unit.findOne({ where: { deviceId: device_no } });
+    if (unit) {
+        const tx = await Transaction.create({
+            userId: 1, // 投币无用户，使用系统用户
+            unitId: unit.id,
+            deviceId: device_no,
+            type: 'WaterPurchase',
+            amount: cash,
+            status: 'Completed',
+            volume: volume,
+            description: `Coin Water Purchase at ${device_no}`
+        });
+        await processProfitSharing(tx);
+    }
 }
 
 /**
@@ -239,7 +255,9 @@ async function handleCardlessWaterDispense(data) {
             }
 
             // 触发分润
-            await processProfitSharing(out_trade_no, cash, device_no, customer.id);
+            if (transaction) {
+                await processProfitSharing(transaction);
+            }
 
             console.log(`[Callback] Unit ${device_no} dispensed ${volume}ml. User ${customer.phoneNumber} charged Rp ${cash}`);
         }
@@ -292,15 +310,21 @@ async function handleEcardWaterDispense(data) {
         // 更新用户余额
         await user.update({ balance: end_balance });
 
-        // 创建本地交易记录（最大余额模式只记录实际消费）
-        await Transaction.create({
-            userId: user.id,
-            type: 'WaterPurchase',
-            amount: cash,
-            status: water_state === 1 ? 'Completed' : 'Failed',
-            volume: volume,
-            description: `E-card Water Purchase at ${device_no}`
-        });
+        // 创建本地交易记录并触发分润
+        if (water_state === 1) {
+            const unit = await Unit.findOne({ where: { deviceId: device_no } });
+            const tx = await Transaction.create({
+                userId: user.id,
+                unitId: unit ? unit.id : null,
+                deviceId: device_no,
+                type: 'WaterPurchase',
+                amount: cash,
+                status: 'Completed',
+                volume: volume,
+                description: `E-card Water Purchase at ${device_no}`
+            });
+            if (unit) await processProfitSharing(tx);
+        }
     }
 
     // 2. 保存到人人水站交易记录

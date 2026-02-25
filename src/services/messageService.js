@@ -2,8 +2,19 @@ const axios = require('axios');
 
 /**
  * 消息通用适配器服务
- * 支持: WhatsApp (Meta/Twilio), SMS (Twilio), 以及本地 Mock 测试
+ * 支持: WhatsApp (Meta/Twilio) 以及本地 Mock 测试
  */
+
+/**
+ * 将手机号标准化为 E.164 格式 (+62xxxxxxxxxx)
+ * 支持输入: 0812xxx, 812xxx, 62812xxx, +62812xxx
+ */
+function normalizeToE164(phone) {
+    let cleaned = phone.replace(/\D/g, '');
+    if (cleaned.startsWith('0')) cleaned = '62' + cleaned.slice(1);
+    if (!cleaned.startsWith('62')) cleaned = '62' + cleaned;
+    return '+' + cleaned;
+}
 
 // 1. WhatsApp - Meta 官方 API 实现
 const sendMetaWhatsAppOTP = async (phoneNumber, otp) => {
@@ -11,7 +22,7 @@ const sendMetaWhatsAppOTP = async (phoneNumber, otp) => {
     const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     const templateName = process.env.WHATSAPP_TEMPLATE_NAME || 'otp_verification';
 
-    const formattedPhone = phoneNumber.replace(/\D/g, '');
+    const formattedPhone = normalizeToE164(phoneNumber).replace('+', '');
 
     try {
         const response = await axios.post(
@@ -43,8 +54,14 @@ const sendMetaWhatsAppOTP = async (phoneNumber, otp) => {
         console.log(`[WhatsApp Meta] Sent successfully: ${response.data.messages[0].id}`);
         return { success: true, provider: 'meta_whatsapp', messageId: response.data.messages[0].id };
     } catch (error) {
-        console.error(`[WhatsApp Meta] Error:`, error.response?.data || error.message);
-        throw new Error('Failed to send WhatsApp via Meta');
+        const errData = error.response?.data?.error;
+        const errCode = errData?.code;
+        console.error(`[WhatsApp Meta] Error (code: ${errCode}):`, errData || error.message);
+        // 131026 = 号码未注册 WhatsApp
+        if (errCode === 131026) {
+            throw new Error('This phone number is not registered on WhatsApp');
+        }
+        throw new Error('Failed to send WhatsApp OTP via Meta');
     }
 };
 
@@ -64,11 +81,13 @@ const sendTwilioWhatsAppOTP = async (phoneNumber, otp) => {
     }
     const client = twilio(accountSid, authToken);
 
+    const normalized = normalizeToE164(phoneNumber);
+
     try {
         const message = await client.messages.create({
             body: `Your ATMWater verification code is: ${otp}. Valid for 5 minutes.`,
             from: fromPhone,
-            to: `whatsapp:${phoneNumber.startsWith('+') ? phoneNumber : '+' + phoneNumber}`
+            to: `whatsapp:${normalized}`
         });
         console.log(`[WhatsApp Twilio] Sent: ${message.sid}`);
         return { success: true, provider: 'twilio_whatsapp', messageId: message.sid };
@@ -78,60 +97,23 @@ const sendTwilioWhatsAppOTP = async (phoneNumber, otp) => {
     }
 };
 
-// 3. SMS - Twilio 实现 (应对 WhatsApp 权限问题)
-const sendTwilioSMSOTP = async (phoneNumber, otp) => {
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const fromPhone = process.env.TWILIO_SMS_FROM; // 您的 Twilio 购买的手机号
-
-    // 开发调试：打印 OTP 到控制台
-    console.log(`\n================= OTP CODE ==================`);
-    console.log(`To: ${phoneNumber}`);
+// 3. 本地 Mock 实现
+const sendMockOTP = async (phoneNumber, otp) => {
+    const normalized = normalizeToE164(phoneNumber);
+    console.log(`\n================= WHATSAPP OTP MOCK ==================`);
+    console.log(`To: ${normalized}`);
     console.log(`OTP: ${otp}`);
-    console.log(`================================================\n`);
-
-    if (!accountSid || !authToken || !fromPhone) {
-        throw new Error('Twilio SMS credentials (SID, Token, or FROM number) missing');
-    }
-
-    let twilio;
-    try {
-        twilio = require('twilio');
-    } catch (error) {
-        throw new Error('Twilio module not installed. Run: npm install twilio');
-    }
-    const client = twilio(accountSid, authToken);
-
-    try {
-        const message = await client.messages.create({
-            body: `[AirKOP] Verification code: ${otp}. Do not share this with anyone.`,
-            from: fromPhone,
-            to: phoneNumber.startsWith('+') ? phoneNumber : '+' + phoneNumber
-        });
-        console.log(`[SMS Twilio] Sent successfully: ${message.sid}`);
-        return { success: true, provider: 'twilio_sms', messageId: message.sid };
-    } catch (error) {
-        console.error(`[SMS Twilio] Error:`, error.message);
-        throw new Error(`Failed to send SMS via Twilio: ${error.message}`);
-    }
-};
-
-// 4. 本地 Mock 实现
-const sendMockOTP = async (phoneNumber, otp, type = 'SMS/WhatsApp') => {
-    console.log(`\n================= MESSAGE MOCK ==================`);
-    console.log(`Type: ${type}`);
-    console.log(`To: ${phoneNumber}`);
-    console.log(`Message: Your ATMWater OTP is: ${otp}`);
-    console.log(`==================================================\n`);
-    return { success: true, provider: 'mock' };
+    console.log(`Channel: WhatsApp`);
+    console.log(`======================================================\n`);
+    return { success: true, provider: 'mock', channel: 'whatsapp' };
 };
 
 /**
  * 统一发送接口
- * 根据环境变量 MESSAGE_PROVIDER 决定使用哪个供应商和通道
+ * 根据环境变量 MESSAGE_PROVIDER 决定使用哪个 WhatsApp 供应商
  */
 exports.sendOTP = async (phoneNumber, otp) => {
-    const provider = process.env.MESSAGE_PROVIDER || process.env.WHATSAPP_PROVIDER || 'mock';
+    const provider = process.env.MESSAGE_PROVIDER || 'mock';
 
     switch (provider.toLowerCase()) {
         case 'meta':
@@ -140,10 +122,10 @@ exports.sendOTP = async (phoneNumber, otp) => {
         case 'twilio':
         case 'twilio_whatsapp':
             return await sendTwilioWhatsAppOTP(phoneNumber, otp);
-        case 'twilio_sms':
-            return await sendTwilioSMSOTP(phoneNumber, otp);
         case 'mock':
         default:
             return await sendMockOTP(phoneNumber, otp);
     }
 };
+
+exports.normalizeToE164 = normalizeToE164;

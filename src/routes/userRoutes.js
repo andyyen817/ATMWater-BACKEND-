@@ -9,7 +9,8 @@ const {
     deleteAddress,
     getUserHistory,
     getUserCards,
-    getCardTransactions
+    getCardTransactions,
+    uploadUserLog
 } = require('../controllers/userController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -24,5 +25,6 @@ router.post('/bank-accounts', addBankAccount);
 router.delete('/bank-accounts/:id', deleteBankAccount);
 router.post('/addresses', addAddress);
 router.delete('/addresses/:id', deleteAddress);
+router.post('/logs/upload', uploadUserLog);
 
 module.exports = router;

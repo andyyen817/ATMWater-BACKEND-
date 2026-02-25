@@ -1,48 +1,72 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
 
-const settingSchema = new mongoose.Schema({
+const Setting = sequelize.define('Setting', {
+    id: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true
+    },
     key: {
-        type: String,
-        required: true,
+        type: DataTypes.STRING,
+        allowNull: false,
         unique: true,
-        default: 'water_pricing'
+        defaultValue: 'water_pricing'
     },
-    // 售水分润比例 (总和需为 100)
+    // 售水分润比例 (JSON)
     ratios: {
-        airkop: { type: Number, default: 40 },      // 公司 40%
-        rp: { type: Number, default: 40 },          // 区域伙伴 40%
-        steward: { type: Number, default: 15 },     // 水管家 15%
-        growthFund: { type: Number, default: 5 }    // 发展基金 5%
+        type: DataTypes.JSON,
+        defaultValue: {
+            airkop: 40,
+            rp: 40,
+            steward: 15,
+            growthFund: 5
+        }
     },
-    // 云广告收益分润 (总和需为 100)
+    // 云广告收益分润 (JSON)
     adRatios: {
-        airkop: { type: Number, default: 70 },
-        rp: { type: Number, default: 10 },
-        steward: { type: Number, default: 10 },
-        growthFund: { type: Number, default: 10 }
+        type: DataTypes.JSON,
+        defaultValue: {
+            airkop: 70,
+            rp: 10,
+            steward: 10,
+            growthFund: 10
+        }
     },
-    // 维护费阶梯设置
+    // 维护费阶梯设置 (JSON)
     maintenanceFees: {
-        standard: { type: Number, default: 500000 },
-        enhanced: { type: Number, default: 800000 },
-        tdsThreshold: { type: Number, default: 300 },
-        phThreshold: { type: Number, default: 6.5 }
+        type: DataTypes.JSON,
+        defaultValue: {
+            standard: 500000,
+            enhanced: 800000,
+            tdsThreshold: 300,
+            phThreshold: 6.5
+        }
     },
     // 软件使用费
-    softwareFee: { type: Number, default: 200000 },
-    // 水价设置 (Rp/L)
+    softwareFee: {
+        type: DataTypes.DECIMAL(10, 2),
+        defaultValue: 200000
+    },
+    // 水价设置 (JSON)
     prices: {
-        pure: { type: Number, default: 400 },
-        mineral: { type: Number, default: 500 }
+        type: DataTypes.JSON,
+        defaultValue: {
+            pure: 400,
+            mineral: 500
+        }
     },
     updatedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: {
+            model: 'users',
+            key: 'id'
+        }
     }
 }, {
+    tableName: 'settings',
     timestamps: true
 });
-
-const Setting = mongoose.model('Setting', settingSchema);
 
 module.exports = Setting;

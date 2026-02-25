@@ -1,6 +1,6 @@
-const Transaction = require('../models/Transaction');
-const User = require('../models/User');
-const Unit = require('../models/Unit');
+const { Transaction, Unit, User } = require('../models');
+const { Op } = require('sequelize');
+const sequelize = require('../config/database');
 
 /**
  * @desc    获取全量交易流水 (带高级筛选)
@@ -8,50 +8,55 @@ const Unit = require('../models/Unit');
  */
 exports.getAllTransactions = async (req, res) => {
     try {
-        const { 
-            page = 1, 
-            limit = 20, 
-            type, 
-            status, 
-            startDate, 
+        const {
+            page = 1,
+            limit = 20,
+            type,
+            status,
+            startDate,
             endDate,
-            userId 
+            userId
         } = req.query;
 
-        // 1. 构建动态查询条件
-        const query = {};
-        if (type) query.type = type;
-        if (status) query.status = status;
-        if (userId) query.userId = userId;
-        
+        const where = {};
+        if (type) where.type = type;
+        if (status) where.status = status;
+        if (userId) where.userId = userId;
         if (startDate || endDate) {
-            query.createdAt = {};
-            if (startDate) query.createdAt.$gte = new Date(startDate);
-            if (endDate) query.createdAt.$lte = new Date(endDate);
+            where.createdAt = {};
+            if (startDate) where.createdAt[Op.gte] = new Date(startDate);
+            if (endDate) where.createdAt[Op.lte] = new Date(endDate);
         }
 
-        // 2. 执行分页查询
-        const transactions = await Transaction.find(query)
-            .populate('userId', 'name phoneNumber role')
-            .sort({ createdAt: -1 })
-            .limit(limit * 1)
-            .skip((page - 1) * limit);
+        const offset = (parseInt(page) - 1) * parseInt(limit);
 
-        const total = await Transaction.countDocuments(query);
+        const { count, rows } = await Transaction.findAndCountAll({
+            where,
+            include: [{ model: User, as: 'user', attributes: ['name', 'phoneNumber', 'role'] }],
+            order: [['createdAt', 'DESC']],
+            limit: parseInt(limit),
+            offset
+        });
 
-        // 3. 计算汇总统计 (针对当前筛选条件)
-        const stats = await Transaction.aggregate([
-            { $match: query },
-            { $group: { _id: '$type', totalAmount: { $sum: '$amount' }, count: { $sum: 1 } } }
-        ]);
+        // 按类型汇总
+        const stats = await Transaction.findAll({
+            where,
+            attributes: [
+                'type',
+                [sequelize.fn('SUM', sequelize.col('amount')), 'totalAmount'],
+                [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+            ],
+            group: ['type'],
+            raw: true
+        });
 
         res.status(200).json({
             success: true,
-            data: transactions,
+            data: rows,
             stats,
-            total,
-            pages: Math.ceil(total / limit),
-            currentPage: page
+            total: count,
+            pages: Math.ceil(count / parseInt(limit)),
+            currentPage: parseInt(page)
         });
 
     } catch (error) {
@@ -66,40 +71,71 @@ exports.getAllTransactions = async (req, res) => {
  */
 exports.getRevenueStats = async (req, res) => {
     try {
-        // 1. 购水收入统计
-        const totalRevenue = await Transaction.aggregate([
-            { $match: { type: 'WaterPurchase', status: 'Completed' } },
-            { $group: { _id: null, total: { $sum: '$amount' } } }
-        ]);
-
-        // 2. 订阅费收入统计 (从SubscriptionFee类型的交易)
-        const subscriptionRevenue = await Transaction.aggregate([
-            { $match: { type: 'SubscriptionFee', status: 'Completed' } },
-            { $group: { _id: null, total: { $sum: '$amount' } } }
-        ]);
-
-        // 3. 管家奖励统计
-        const stewardRewards = await Transaction.aggregate([
-            { $match: { type: 'StewardReward', status: 'Completed' } },
-            { $group: { _id: null, total: { $sum: '$amount' } } }
-        ]);
-
-        // 4. 超期未维护设备数量
-        const overdueUnits = await Unit.countDocuments({
-            'subscription.isOverdue': true
+        // 1. 购水总收入
+        const waterRevenue = await Transaction.findOne({
+            where: { type: 'WaterPurchase', status: 'Completed' },
+            attributes: [[sequelize.fn('SUM', sequelize.col('amount')), 'total']],
+            raw: true
         });
 
-        // 5. 发展基金 (暂时为0，如果需要可以从Ledger表查询)
-        const growthPool = 0;
+        // 2. 充值总收入
+        const topupRevenue = await Transaction.findOne({
+            where: { type: 'TopUp', status: 'Completed' },
+            attributes: [[sequelize.fn('SUM', sequelize.col('amount')), 'total']],
+            raw: true
+        });
+
+        // 3. 本月购水收入
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthlyRevenue = await Transaction.findOne({
+            where: {
+                type: 'WaterPurchase',
+                status: 'Completed',
+                createdAt: { [Op.gte]: monthStart }
+            },
+            attributes: [[sequelize.fn('SUM', sequelize.col('amount')), 'total']],
+            raw: true
+        });
+
+        // 4. 本月交易笔数
+        const monthlyCount = await Transaction.count({
+            where: {
+                type: 'WaterPurchase',
+                status: 'Completed',
+                createdAt: { [Op.gte]: monthStart }
+            }
+        });
+
+        // 5. 活跃水站数
+        const activeUnits = await Unit.count({ where: { isActive: true } });
+
+        // 6. 分润账本汇总（从 profit_sharing_ledger 表）
+        const [ledgerStats] = await sequelize.query(`
+            SELECT
+                SUM(CASE WHEN account_type='Steward' THEN amount ELSE 0 END) as stewardTotal,
+                SUM(CASE WHEN account_type='RP' THEN amount ELSE 0 END) as rpTotal,
+                SUM(CASE WHEN account_type='Headquarters' THEN amount ELSE 0 END) as hqTotal
+            FROM profit_sharing_ledger
+            WHERE status='Settled'
+        `);
+
+        const ledger = ledgerStats[0] || {};
 
         res.status(200).json({
             success: true,
             data: {
-                totalRevenue: totalRevenue[0]?.total || 0,
-                subscriptionRevenue: subscriptionRevenue[0]?.total || 0,
-                stewardRewards: stewardRewards[0]?.total || 0,
-                growthPool: growthPool,
-                overdueUnits: overdueUnits
+                totalRevenue: parseFloat(waterRevenue?.total) || 0,
+                topupRevenue: parseFloat(topupRevenue?.total) || 0,
+                monthlyRevenue: parseFloat(monthlyRevenue?.total) || 0,
+                monthlyCount,
+                activeUnits,
+                stewardRewards: parseFloat(ledger.stewardTotal) || 0,
+                rpRevenue: parseFloat(ledger.rpTotal) || 0,
+                headquartersRevenue: parseFloat(ledger.hqTotal) || 0,
+                subscriptionRevenue: 0,
+                growthPool: 0,
+                overdueUnits: 0
             }
         });
     } catch (error) {
@@ -109,16 +145,20 @@ exports.getRevenueStats = async (req, res) => {
 };
 
 /**
- * @desc    导出数据模拟 (生成 CSV 格式数据)
+ * @desc    导出交易数据 CSV
  * @route   GET /api/finance/export
  */
 exports.exportTransactions = async (req, res) => {
     try {
-        const transactions = await Transaction.find().populate('userId', 'name phoneNumber');
-        
-        let csv = 'ID,Date,User,Phone,Type,Amount(Rp),Status\n';
+        const transactions = await Transaction.findAll({
+            include: [{ model: User, as: 'user', attributes: ['name', 'phoneNumber'] }],
+            order: [['createdAt', 'DESC']],
+            limit: 5000
+        });
+
+        let csv = 'ID,Date,User,Phone,Type,Amount(Rp),Volume(ml),Status\n';
         transactions.forEach(t => {
-            csv += `${t._id},${t.createdAt.toISOString()},${t.userId?.name || 'N/A'},${t.userId?.phoneNumber || 'N/A'},${t.type},${t.amount/100},${t.status}\n`;
+            csv += `${t.id},${t.createdAt.toISOString()},${t.user?.name || 'N/A'},${t.user?.phoneNumber || 'N/A'},${t.type},${t.amount},${t.volume || 0},${t.status}\n`;
         });
 
         res.header('Content-Type', 'text/csv');
@@ -128,4 +168,3 @@ exports.exportTransactions = async (req, res) => {
         res.status(500).json({ success: false, message: 'Export Failed' });
     }
 };
-
