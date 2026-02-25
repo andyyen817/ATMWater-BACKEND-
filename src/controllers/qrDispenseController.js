@@ -39,6 +39,7 @@ exports.dispenseByQR = async (req, res) => {
     // 3. 检查设备在线（本地 TCP 连接 OR 数据库状态为 Online）
     const tcpConnected = isDeviceConnected(targetDeviceId);
     const dbOnline = unit.status && unit.status.toLowerCase() === 'online';
+    console.log(`[QR Dispense] 🔍 Device check: targetDeviceId=${targetDeviceId}, tcpConnected=${tcpConnected}, dbStatus=${unit.status}, dbOnline=${dbOnline}`);
     if (!tcpConnected && !dbOnline) {
       return res.status(503).json({
         success: false,
@@ -111,6 +112,7 @@ exports.dispenseByQR = async (req, res) => {
 
     // 11. 发送 OpenWater TCP 命令
     const hwType = waterType === 'pure' ? 'RO' : 'UF';
+    console.log(`[QR Dispense] 🔍 About to send OpenWater: tcpConnected=${tcpConnected}, deviceId=${targetDeviceId}, RFID=${user.virtualRfid}, Type=${hwType}, PWM=${pwm}, RE=${recordId}`);
     if (tcpConnected) {
       // 设备直连本地 TCP，直接发送命令
       try {
