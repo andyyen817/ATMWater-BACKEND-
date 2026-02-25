@@ -615,6 +615,59 @@ async function handleWaterRecord(cmd, deviceId) {
   log(`[TCP] 🔍   - deviceId: ${deviceId}`);
   log(`[TCP] 🔍   - RFID: ${RFID}`);
   log(`[TCP] 🔍   - Amount: ${Money}`);
+  log(`[TCP] 🔍   - RE: ${RE}`);
+
+  // ★ QR 扫码订单匹配：RE 以 QR_ 开头说明是 APP 扫码发起的出水
+  // dispenseByQR 已经预扣款并创建了 Pending 交易，这里只需更新状态，不再扣款
+  if (RE && RE.startsWith('QR_')) {
+    try {
+      const existingTx = await Transaction.findOne({ where: { recordId: RE, status: 'Pending' } });
+      if (existingTx) {
+        log(`[TCP] ✅ QR order matched: RE=${RE}, txId=${existingTx.id}`);
+
+        // 用硬件实际数据更新交易记录（不再扣款）
+        await existingTx.update({
+          status: 'Completed',
+          completedAt: TE ? new Date(parseInt(TE) * 1000) : new Date(),
+          pulseCount: parseInt(PWM) || existingTx.pulseCount,
+          dispensingTime: parseInt(FT) || null,
+          inputTds: parseInt(IDS) || null,
+          outputTds: parseInt(Tds) || null,
+          waterTemp: parseFloat(Tmp) || null,
+        });
+
+        // 更新设备水质数据
+        const unit = await Unit.findOne({ where: { deviceId } });
+        if (unit) {
+          await unit.update({
+            tdsValue: parseInt(Tds) || null,
+            temperature: parseFloat(Tmp) || null,
+            lastHeartbeatAt: new Date(),
+          });
+        }
+
+        // WebSocket 推送完成状态到 APP
+        websocketService.broadcast({
+          type: 'dispense_status',
+          data: { orderId: existingTx.id, status: 'completed' }
+        });
+
+        const user = await User.findByPk(existingTx.userId);
+        log(`[TCP] ✅ QR order completed: RE=${RE}, user balance=${user ? user.balance : 'N/A'}`);
+
+        return {
+          Cmd: 'WR', RFID, RE, RT: 'OK',
+          LeftL: '-1',
+          LeftM: user ? user.balance.toString() : '-1',
+          DayLmt: '-1'
+        };
+      }
+      // 找不到 Pending 交易（可能已被超时处理），继续走正常流程
+      log(`[TCP] ⚠️ QR order not found as Pending: RE=${RE}, falling through to normal flow`);
+    } catch (err) {
+      logError('[TCP] QR WR matching error:', err.message);
+    }
+  }
 
   try {
     // 1. 查找设备

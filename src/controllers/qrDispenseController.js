@@ -150,21 +150,25 @@ exports.dispenseByQR = async (req, res) => {
       }
     });
 
-    // 13. 60秒超时自动完成（设备大概率已出水）
+    // 13. 5分钟安全超时（正常情况下 WR 回传会在几秒内完成订单）
+    // 如果超时仍为 Pending，说明硬件未回传 WR，回滚退款
     setTimeout(async () => {
       try {
         const tx = await Transaction.findByPk(transaction.id);
         if (tx && tx.status === 'Pending') {
-          await tx.update({ status: 'Completed', completedAt: new Date() });
+          await tx.update({ status: 'Failed' });
+          const u = await User.findByPk(tx.userId);
+          if (u) await u.update({ balance: parseFloat(u.balance) + totalCost });
           websocketService.broadcast({
             type: 'dispense_status',
-            data: { orderId: tx.id, status: 'completed' }
+            data: { orderId: tx.id, status: 'failed' }
           });
+          console.log(`[QR Dispense] Timeout: order ${tx.id} failed, refunded ${totalCost}`);
         }
       } catch (err) {
         console.error('[QR Dispense] Timeout handler error:', err.message);
       }
-    }, 60000);
+    }, 300000);
 
     // 14. 返回结果
     return res.status(200).json({
