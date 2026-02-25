@@ -619,53 +619,82 @@ async function handleWaterRecord(cmd, deviceId) {
 
   // ★ QR 扫码订单匹配：RE 以 QR_ 开头说明是 APP 扫码发起的出水
   // dispenseByQR 已经预扣款并创建了 Pending 交易，这里只需更新状态，不再扣款
+  // 注意：某些设备固件会忽略 RE 字段，回传自己的内部编号，所以需要 fallback 匹配
+  let qrTransaction = null;
+
   if (RE && RE.startsWith('QR_')) {
     try {
-      const existingTx = await Transaction.findOne({ where: { recordId: RE, status: 'Pending' } });
-      if (existingTx) {
-        log(`[TCP] ✅ QR order matched: RE=${RE}, txId=${existingTx.id}`);
-
-        // 用硬件实际数据更新交易记录（不再扣款）
-        await existingTx.update({
-          status: 'Completed',
-          completedAt: TE ? new Date(parseInt(TE) * 1000) : new Date(),
-          pulseCount: parseInt(PWM) || existingTx.pulseCount,
-          dispensingTime: parseInt(FT) || null,
-          inputTds: parseInt(IDS) || null,
-          outputTds: parseInt(Tds) || null,
-          waterTemp: parseFloat(Tmp) || null,
-        });
-
-        // 更新设备水质数据
-        const unit = await Unit.findOne({ where: { deviceId } });
-        if (unit) {
-          await unit.update({
-            tdsValue: parseInt(Tds) || null,
-            temperature: parseFloat(Tmp) || null,
-            lastHeartbeatAt: new Date(),
-          });
-        }
-
-        // WebSocket 推送完成状态到 APP
-        websocketService.broadcast({
-          type: 'dispense_status',
-          data: { orderId: existingTx.id, status: 'completed' }
-        });
-
-        const user = await User.findByPk(existingTx.userId);
-        log(`[TCP] ✅ QR order completed: RE=${RE}, user balance=${user ? user.balance : 'N/A'}`);
-
-        return {
-          Cmd: 'WR', RFID, RE, RT: 'OK',
-          LeftL: '-1',
-          LeftM: user ? user.balance.toString() : '-1',
-          DayLmt: '-1'
-        };
-      }
-      // 找不到 Pending 交易（可能已被超时处理），继续走正常流程
-      log(`[TCP] ⚠️ QR order not found as Pending: RE=${RE}, falling through to normal flow`);
+      qrTransaction = await Transaction.findOne({ where: { recordId: RE, status: 'Pending' } });
     } catch (err) {
       logError('[TCP] QR WR matching error:', err.message);
+    }
+  }
+
+  // Fallback：设备未回传 QR_ RE，按 deviceId + Pending 状态 + 5分钟内匹配
+  if (!qrTransaction) {
+    try {
+      const { Op } = require('sequelize');
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+      qrTransaction = await Transaction.findOne({
+        where: {
+          deviceId,
+          status: 'Pending',
+          cardType: 'Virtual',
+          recordId: { [Op.like]: 'QR_%' },
+          createdAt: { [Op.gte]: fiveMinAgo }
+        },
+        order: [['createdAt', 'DESC']]
+      });
+      if (qrTransaction) {
+        log(`[TCP] 🔍 QR order fallback matched: txId=${qrTransaction.id}, recordId=${qrTransaction.recordId}, device RE=${RE}`);
+      }
+    } catch (err) {
+      logError('[TCP] QR fallback matching error:', err.message);
+    }
+  }
+
+  if (qrTransaction) {
+    try {
+      log(`[TCP] ✅ QR order matched: txId=${qrTransaction.id}, recordId=${qrTransaction.recordId}`);
+
+      // 用硬件实际数据更新交易记录（不再扣款）
+      await qrTransaction.update({
+        status: 'Completed',
+        completedAt: TE ? new Date(parseInt(TE) * 1000) : new Date(),
+        pulseCount: parseInt(PWM) || qrTransaction.pulseCount,
+        dispensingTime: parseInt(FT) || null,
+        inputTds: parseInt(IDS) || null,
+        outputTds: parseInt(Tds) || null,
+        waterTemp: parseFloat(Tmp) || null,
+      });
+
+      // 更新设备水质数据
+      const unit = await Unit.findOne({ where: { deviceId } });
+      if (unit) {
+        await unit.update({
+          tdsValue: parseInt(Tds) || null,
+          temperature: parseFloat(Tmp) || null,
+          lastHeartbeatAt: new Date(),
+        });
+      }
+
+      // WebSocket 推送完成状态到 APP
+      websocketService.broadcast({
+        type: 'dispense_status',
+        data: { orderId: qrTransaction.id, status: 'completed' }
+      });
+
+      const user = await User.findByPk(qrTransaction.userId);
+      log(`[TCP] ✅ QR order completed: txId=${qrTransaction.id}, user balance=${user ? user.balance : 'N/A'}`);
+
+      return {
+        Cmd: 'WR', RFID, RE, RT: 'OK',
+        LeftL: '-1',
+        LeftM: user ? user.balance.toString() : '-1',
+        DayLmt: '-1'
+      };
+    } catch (err) {
+      logError('[TCP] QR WR completion error:', err.message);
     }
   }
 
