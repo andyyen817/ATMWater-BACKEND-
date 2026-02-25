@@ -7,27 +7,37 @@ const { getUnitPricing } = require('../services/profitSharing/regionalPricingSer
 /**
  * POST /api/iot/dispense/qr
  * 扫码取水核心接口
- * Body: { qrCode, waterType: 'pure'|'mineral', amount (升) }
+ * Body: { qrCode?, deviceId?, waterType: 'pure'|'mineral', amount (升) }
+ * 支持两种模式：1) 扫码传 qrCode  2) 手动输入传 deviceId
  */
 exports.dispenseByQR = async (req, res) => {
-  const { qrCode, waterType, amount } = req.body;
+  const { qrCode, waterType, amount, deviceId: directDeviceId } = req.body;
   const userId = req.user.id;
 
   try {
-    // 1. 验证 QR 码
-    const qrResult = parseAndValidateQR(qrCode);
-    if (!qrResult.valid) {
-      return res.status(400).json({ success: false, message: qrResult.error });
+    // 1. 解析设备ID：优先用 directDeviceId（手动输入），否则从 QR 码解析
+    let targetDeviceId = null;
+
+    if (directDeviceId) {
+      targetDeviceId = directDeviceId;
+    } else if (qrCode) {
+      const qrResult = parseAndValidateQR(qrCode);
+      if (!qrResult.valid) {
+        return res.status(400).json({ success: false, message: qrResult.error });
+      }
+      targetDeviceId = qrResult.deviceId;
+    } else {
+      return res.status(400).json({ success: false, message: 'Missing qrCode or deviceId' });
     }
 
     // 2. 查找设备
-    const unit = await Unit.findOne({ where: { deviceId: qrResult.deviceId } });
+    const unit = await Unit.findOne({ where: { deviceId: targetDeviceId } });
     if (!unit) {
       return res.status(404).json({ success: false, message: 'Device not found' });
     }
 
     // 3. 检查设备在线（本地 TCP 连接 OR 数据库状态为 Online）
-    const tcpConnected = isDeviceConnected(qrResult.deviceId);
+    const tcpConnected = isDeviceConnected(targetDeviceId);
     const dbOnline = unit.status && unit.status.toLowerCase() === 'online';
     if (!tcpConnected && !dbOnline) {
       return res.status(503).json({
@@ -44,7 +54,7 @@ exports.dispenseByQR = async (req, res) => {
     }
 
     // 5. 获取区域定价
-    const pricing = await getUnitPricing(qrResult.deviceId);
+    const pricing = await getUnitPricing(targetDeviceId);
     const pricePerLiter = waterType === 'pure'
       ? pricing.pureWaterPrice
       : pricing.mineralWaterPrice;
@@ -77,7 +87,7 @@ exports.dispenseByQR = async (req, res) => {
     const transaction = await Transaction.create({
       userId: user.id,
       unitId: unit.id,
-      deviceId: qrResult.deviceId,
+      deviceId: targetDeviceId,
       type: 'WaterPurchase',
       amount: totalCost,
       balanceBefore,
@@ -97,7 +107,7 @@ exports.dispenseByQR = async (req, res) => {
     if (tcpConnected) {
       // 设备直连本地 TCP，直接发送命令
       try {
-        await sendCommandToDevice(qrResult.deviceId, {
+        await sendCommandToDevice(targetDeviceId, {
           Cmd: 'OpenWater',
           RFID: user.virtualRfid,
           Money: totalCost.toFixed(2),
@@ -133,7 +143,7 @@ exports.dispenseByQR = async (req, res) => {
       data: {
         orderId: transaction.id,
         status: 'dispensing',
-        deviceId: qrResult.deviceId,
+        deviceId: targetDeviceId,
         userId,
         amount,
         cost: totalCost
@@ -165,7 +175,7 @@ exports.dispenseByQR = async (req, res) => {
         amount,
         cost: totalCost,
         balance: balanceAfter,
-        deviceId: qrResult.deviceId,
+        deviceId: targetDeviceId,
         waterType
       }
     });
