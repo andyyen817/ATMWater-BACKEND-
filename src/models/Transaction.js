@@ -172,7 +172,7 @@ const Transaction = sequelize.define('Transaction', {
     allowNull: true,
     comment: '物理卡ID（若来源为物理卡）',
     references: {
-      model: 'cards',
+      model: 'physical_cards',
       key: 'id'
     },
     onUpdate: 'CASCADE',

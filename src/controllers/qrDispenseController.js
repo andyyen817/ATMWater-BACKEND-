@@ -129,8 +129,9 @@ exports.dispenseByQR = async (req, res) => {
     // 12. 发送 OpenWater TCP 命令
     const hwType = waterType === 'pure' ? 'RO' : 'UF';
     console.log(`[QR Dispense] 🔍 About to send OpenWater: tcpConnected=${tcpConnected}, deviceId=${targetDeviceId}, RFID=${user.virtualRfid}, Type=${hwType}, PWM=${pwm}, RE=${recordId}`);
+
+    // 优先使用 TCP 连接，如果不存在则标记为云端处理
     if (tcpConnected) {
-      // 设备直连本地 TCP，直接发送命令
       try {
         await sendCommandToDevice(targetDeviceId, {
           Cmd: 'OpenWater',
@@ -140,25 +141,21 @@ exports.dispenseByQR = async (req, res) => {
           Type: hwType,
           RE: recordId
         });
+        console.log(`[QR Dispense] ✅ Command sent via TCP: ${targetDeviceId}`);
       } catch (tcpError) {
-        // 回滚：退款 + 标记交易失败
-        await user.update({ balance: balanceBefore });
-        await transaction.update({ status: 'Failed' });
-        return res.status(503).json({
-          success: false,
-          message: 'Failed to communicate with device',
-          code: 'TCP_SEND_FAILED'
+        console.error('[QR Dispense] ⚠️ TCP send failed:', tcpError.message);
+        // 不回滚，标记为待处理
+        await transaction.update({
+          status: 'Pending',
+          notes: 'TCP send failed, waiting for device reconnection'
         });
       }
     } else {
-      // 设备连在其他后端实例（云端 TCP），本地无法发送命令
-      // 回滚：退款 + 标记交易失败
-      await user.update({ balance: balanceBefore });
-      await transaction.update({ status: 'Failed' });
-      return res.status(503).json({
-        success: false,
-        message: 'Device connected to cloud server, please use cloud API',
-        code: 'DEVICE_ON_REMOTE_TCP'
+      // 设备未连接到本地 TCP，标记为云端处理
+      console.log(`[QR Dispense] ⚠️ Device not connected locally, marking as cloud-handled: ${targetDeviceId}`);
+      await transaction.update({
+        status: 'Pending',
+        notes: 'Device on remote TCP or offline, will be processed when device reconnects'
       });
     }
 
@@ -195,12 +192,13 @@ exports.dispenseByQR = async (req, res) => {
       }
     }, 300000);
 
-    // 15. 返回结果
+    // 15. 返回结果（余额已扣除，等待设备处理）
     return res.status(200).json({
       success: true,
+      message: 'Dispense request submitted',
       data: {
         orderId: transaction.id,
-        status: 'dispensing',
+        status: tcpConnected ? 'dispensing' : 'pending',
         amount,
         cost: totalCost,
         balance: balanceAfter,
