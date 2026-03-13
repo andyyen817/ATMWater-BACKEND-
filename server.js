@@ -717,6 +717,16 @@ app.use('/api/settings', require('./src/routes/settingRoutes'));
 app.use('/api/profit-sharing', require('./src/routes/profitSharingRoutes'));
 
 // ========================================
+// Card Routes (物理水卡管理)
+// ========================================
+app.use('/api/cards', require('./src/routes/cardRoutes'));
+
+// ========================================
+// QR Code Routes (二维码验证)
+// ========================================
+app.use('/api/qr', require('./src/routes/qrRoutes'));
+
+// ========================================
 // 404 Handler - 返回JSON而不是HTML
 // ========================================
 app.use((req, res, next) => {

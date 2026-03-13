@@ -35,21 +35,23 @@ exports.createTopUp = async (req, res) => {
         user.balance = newBalance;
         await user.save();
 
-        // 4. 创建已完成的交易记录
+        // 4. 创建已完成的交易记录 - 标记为App充值水币
         await Transaction.create({
             userId,
             type: 'TopUp',
             amount,
+            balanceType: 'APP_BACKED', // 标记为App充值
+            profitShared: false, // 待出水时分账
             externalId: outTradeNo,
             status: 'Completed',
-            description: `E-Card Top Up - Rp ${new Intl.NumberFormat('id-ID').format(amount)}`
+            description: `Water Coin Purchase - 💧 ${new Intl.NumberFormat('id-ID').format(amount)}`
         });
 
-        console.log(`[Wallet TopUp] Success: User ${userId} topped up ${amount}, new balance: ${newBalance}`);
+        console.log(`[Wallet TopUp] Success: User ${userId} purchased ${amount} Water Coins, new balance: ${newBalance}`);
 
         return res.status(200).json({
             success: true,
-            message: 'Top-up successful!',
+            message: `Successfully purchased 💧 ${new Intl.NumberFormat('id-ID').format(amount)} Water Coins!`,
             balance: newBalance,
             externalId: outTradeNo
         });

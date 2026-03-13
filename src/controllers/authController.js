@@ -323,3 +323,118 @@ exports.loginWithEmail = async (req, res) => {
         });
     }
 };
+
+/**
+ * @desc    Email 注册（仅邮箱 + 密码，不需要手机号）
+ * @route   POST /api/auth/register-email
+ * @access  Public
+ */
+exports.registerWithEmail = async (req, res) => {
+    try {
+        const { email, password, name, referralCode } = req.body;
+
+        // 验证必填字段
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email and password are required'
+            });
+        }
+
+        // 验证邮箱格式
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid email format'
+            });
+        }
+
+        // 验证密码长度（至少6位即可，暂时不验证复杂度）
+        if (password.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: 'Password must be at least 6 characters'
+            });
+        }
+
+        // 检查邮箱是否已注册
+        const existingUser = await User.findOne({ where: { email } });
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email already registered'
+            });
+        }
+
+        // 处理推荐码
+        let referredByUser = null;
+        if (referralCode) {
+            referredByUser = await User.findOne({ where: { referralCode } });
+            if (!referredByUser) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid referral code'
+                });
+            }
+        }
+
+        // 创建新用户（暂时不验证邮箱，直接注册成功）
+        const newUser = await User.create({
+            email,
+            password, // 会被 beforeCreate hook 自动加密
+            name: name || null,
+            phoneNumber: null, // 仅邮箱注册，手机号为空
+            role: 'User',
+            balance: 0.00,
+            isActive: true,
+            isVerified: true, // 暂时跳过邮箱验证，直接设为已验证
+            referredBy: referralCode || null,
+            lastLoginAt: new Date()
+        });
+
+        console.log('[Email Register] New user created:', {
+            id: newUser.id,
+            email: newUser.email,
+            virtualRfid: newUser.virtualRfid
+        });
+
+        // 生成 JWT token
+        const token = jwt.sign(
+            { id: newUser.id, email: newUser.email, role: newUser.role },
+            process.env.JWT_SECRET,
+            { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+        );
+
+        // 生成 refresh token
+        const refreshToken = jwt.sign(
+            { id: newUser.id },
+            process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+            { expiresIn: '30d' }
+        );
+
+        res.status(201).json({
+            success: true,
+            message: 'Registration successful! Welcome to ATMWater',
+            data: {
+                token,
+                refreshToken,
+                user: {
+                    id: newUser.id,
+                    email: newUser.email,
+                    name: newUser.name,
+                    role: newUser.role,
+                    balance: newUser.balance,
+                    virtualRfid: newUser.virtualRfid,
+                    referralCode: newUser.referralCode
+                }
+            }
+        });
+    } catch (error) {
+        console.error('[registerWithEmail] Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error during registration'
+        });
+    }
+};

@@ -158,7 +158,49 @@ const Transaction = sequelize.define('Transaction', {
     allowNull: true,
     comment: '交易描述'
   },
-  
+
+  // ========== 水币来源追踪 ==========
+  balanceType: {
+    type: DataTypes.ENUM('APP_BACKED', 'PHYSICAL_BACKED'),
+    defaultValue: 'APP_BACKED',
+    allowNull: false,
+    comment: '水币来源类型: APP_BACKED=App充值, PHYSICAL_BACKED=物理卡'
+  },
+
+  originCardId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: '物理卡ID（若来源为物理卡）',
+    references: {
+      model: 'cards',
+      key: 'id'
+    },
+    onUpdate: 'CASCADE',
+    onDelete: 'SET NULL'
+  },
+
+  // ========== 分账信息 ==========
+  profitShared: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    allowNull: false,
+    comment: '是否已分账'
+  },
+
+  stationRevenue: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0,
+    allowNull: false,
+    comment: '站点分润金额'
+  },
+
+  rpRevenue: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0,
+    allowNull: false,
+    comment: 'RP区域代理分润金额'
+  },
+
   // ========== 时间戳 ==========
   completedAt: {
     type: DataTypes.DATE,
@@ -176,7 +218,10 @@ const Transaction = sequelize.define('Transaction', {
     { fields: ['type'] },
     { fields: ['status'] },
     { fields: ['rfid'] },
-    { fields: ['created_at'] }
+    { fields: ['created_at'] },
+    { fields: ['balance_type'] },
+    { fields: ['profit_shared'] },
+    { fields: ['origin_card_id'] }
   ]
 });
 

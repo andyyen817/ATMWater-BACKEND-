@@ -3,6 +3,7 @@ const { parseAndValidateQR } = require('../utils/qrcode');
 const { sendCommandToDevice, isDeviceConnected } = require('../services/tcpServer');
 const websocketService = require('../services/websocketService');
 const { getUnitPricing } = require('../services/profitSharing/regionalPricingService');
+const { calculateAndSplitProfit } = require('../services/profitSharing/waterCoinSplitService');
 
 /**
  * POST /api/iot/dispense/qr
@@ -91,7 +92,18 @@ exports.dispenseByQR = async (req, res) => {
     const balanceAfter = balanceBefore - totalCost;
     await user.update({ balance: balanceAfter });
 
-    // 10. 创建 Pending 交易
+    // 10. 执行分账计算
+    const splitResult = await calculateAndSplitProfit({
+      userId: user.id,
+      unitId: unit.id,
+      totalCost,
+      volume: amount,
+      pricePerLiter
+    });
+
+    console.log(`[QR Dispense] Split result:`, splitResult);
+
+    // 11. 创建 Pending 交易（包含分账信息）
     const transaction = await Transaction.create({
       userId: user.id,
       unitId: unit.id,
@@ -107,10 +119,14 @@ exports.dispenseByQR = async (req, res) => {
       cardType: 'Virtual',
       recordId,
       status: 'Pending',
-      description: `QR Scan - ${waterType === 'pure' ? 'RO' : 'UF'}`
+      profitShared: splitResult.success,
+      stationRevenue: splitResult.stationRevenue || 0,
+      rpRevenue: splitResult.rpRevenue || 0,
+      description: `QR Scan - ${waterType === 'pure' ? 'RO' : 'UF'} ${splitResult.description || ''}`
     });
 
-    // 11. 发送 OpenWater TCP 命令
+    // 12. 发送 OpenWater TCP 命令
+    // 12. 发送 OpenWater TCP 命令
     const hwType = waterType === 'pure' ? 'RO' : 'UF';
     console.log(`[QR Dispense] 🔍 About to send OpenWater: tcpConnected=${tcpConnected}, deviceId=${targetDeviceId}, RFID=${user.virtualRfid}, Type=${hwType}, PWM=${pwm}, RE=${recordId}`);
     if (tcpConnected) {
@@ -146,7 +162,7 @@ exports.dispenseByQR = async (req, res) => {
       });
     }
 
-    // 12. WebSocket 推送出水状态
+    // 13. WebSocket 推送出水状态
     websocketService.broadcast({
       type: 'dispense_status',
       data: {
@@ -159,7 +175,7 @@ exports.dispenseByQR = async (req, res) => {
       }
     });
 
-    // 13. 5分钟安全超时（正常情况下 WR 回传会在几秒内完成订单）
+    // 14. 5分钟安全超时（正常情况下 WR 回传会在几秒内完成订单）
     // 如果超时仍为 Pending，说明硬件未回传 WR，回滚退款
     setTimeout(async () => {
       try {
@@ -179,7 +195,7 @@ exports.dispenseByQR = async (req, res) => {
       }
     }, 300000);
 
-    // 14. 返回结果
+    // 15. 返回结果
     return res.status(200).json({
       success: true,
       data: {

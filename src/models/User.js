@@ -15,33 +15,34 @@ const User = sequelize.define('User', {
   // ========== 基本信息 ==========
   phoneNumber: {
     type: DataTypes.STRING(20),
-    allowNull: false,
+    allowNull: true,  // 修改为可选，支持仅邮箱注册
     unique: true,
     field: 'phone',  // 数据库字段名是 phone
     comment: '手机号（唯一标识）'
   },
-  
+
   password: {
     type: DataTypes.STRING(255),
     allowNull: true,  // OTP注册时可以不设置密码
     comment: '密码（bcrypt加密）'
   },
-  
+
   pin: {
     type: DataTypes.STRING(4),
     allowNull: true,
     comment: '4位数字PIN码（用于设备刷卡）'
   },
-  
+
   name: {
     type: DataTypes.STRING(100),
     allowNull: true,
     comment: '用户姓名'
   },
-  
+
   email: {
     type: DataTypes.STRING(100),
     allowNull: true,
+    unique: true,  // 添加唯一约束，支持邮箱作为主要标识
     comment: '邮箱'
   },
   
@@ -157,18 +158,30 @@ User.prototype.comparePin = function(candidatePin) {
 
 // 保存前加密密码
 User.beforeCreate(async (user) => {
+  // 验证：至少有 phone 或 email 之一
+  if (!user.phoneNumber && !user.email) {
+    throw new Error('Either phoneNumber or email must be provided');
+  }
+
   if (user.password) {
     user.password = await bcrypt.hash(user.password, 10);
   }
-  
-  // 自动生成虚拟RFID（使用手机号）
-  if (!user.virtualRfid && user.phoneNumber) {
-    user.virtualRfid = `VIRT_${user.phoneNumber}`;
+
+  // 自动生成虚拟RFID
+  if (!user.virtualRfid) {
+    if (user.phoneNumber) {
+      user.virtualRfid = `VIRT_${user.phoneNumber}`;
+    } else if (user.email) {
+      // 使用邮箱生成虚拟 RFID（取邮箱前缀 + 随机字符串）
+      const emailPrefix = user.email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '');
+      const randomStr = Math.random().toString(36).substring(2, 8).toUpperCase();
+      user.virtualRfid = `VIRT_EMAIL_${emailPrefix}_${randomStr}`;
+    }
   }
-  
+
   // 自动生成推荐码
   if (!user.referralCode) {
-    user.referralCode = `R${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    user.referralCode = `R${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
   }
 });
 
@@ -178,8 +191,14 @@ User.beforeUpdate(async (user) => {
     user.password = await bcrypt.hash(user.password, 10);
   }
   // 自动补全虚拟RFID（兼容旧用户）
-  if (!user.virtualRfid && user.phoneNumber) {
-    user.virtualRfid = `VIRT_${user.phoneNumber}`;
+  if (!user.virtualRfid) {
+    if (user.phoneNumber) {
+      user.virtualRfid = `VIRT_${user.phoneNumber}`;
+    } else if (user.email) {
+      const emailPrefix = user.email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '');
+      const randomStr = Math.random().toString(36).substring(2, 8).toUpperCase();
+      user.virtualRfid = `VIRT_EMAIL_${emailPrefix}_${randomStr}`;
+    }
   }
 });
 

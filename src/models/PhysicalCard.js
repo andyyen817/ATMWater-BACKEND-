@@ -47,13 +47,26 @@ const PhysicalCard = sequelize.define('PhysicalCard', {
     comment: '批次ID'
   },
   
+  // ========== 发卡人信息 (v2新增) ==========
+  issuedBy: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: '发卡人ID（售水站管理者）',
+    references: {
+      model: 'users',
+      key: 'id'
+    },
+    onUpdate: 'CASCADE',
+    onDelete: 'SET NULL'
+  },
+
   // ========== 时间戳 ==========
   activatedAt: {
     type: DataTypes.DATE,
     allowNull: true,
     comment: '激活时间'
   },
-  
+
   boundAt: {
     type: DataTypes.DATE,
     allowNull: true,

@@ -5,7 +5,8 @@ const {
     verifyOTP,
     setPassword,
     loginWithPassword,
-    loginWithEmail
+    loginWithEmail,
+    registerWithEmail
 } = require('../controllers/authController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -13,6 +14,9 @@ const { protect } = require('../middleware/authMiddleware');
 router.post('/request-whatsapp-otp', requestOTP);
 router.post('/request-otp', requestOTP); // 保留旧路由兼容
 router.post('/verify-otp', verifyOTP);
+
+// Email 注册
+router.post('/register-email', registerWithEmail);
 
 // 密码登录
 router.post('/set-password', protect, setPassword);
