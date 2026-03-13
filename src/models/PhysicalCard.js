@@ -34,7 +34,7 @@ const PhysicalCard = sequelize.define('PhysicalCard', {
   
   // ========== 卡片状态 ==========
   status: {
-    type: DataTypes.ENUM('Active', 'Inactive', 'Lost', 'Damaged'),
+    type: DataTypes.ENUM('Active', 'Inactive', 'Lost', 'Damaged', 'Linked'),
     defaultValue: 'Active',
     allowNull: false,
     comment: '卡片状态'
