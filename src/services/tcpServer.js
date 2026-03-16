@@ -2,11 +2,15 @@
 // TCP 服务器 - 处理硬件设备连接
 
 const net = require('net');
-const { User, PhysicalCard, Unit, Transaction } = require('../models');
+const { User, PhysicalCard, Unit, Transaction, FirmwareVersion, UpgradeTask } = require('../models');
 const websocketService = require('./websocketService');
+const { calculateCRC8, splitFileIntoPackets } = require('../utils/crcUtils');
 
 // 存储所有活跃的设备连接
 const deviceConnections = new Map();
+
+// 存储升级会话状态
+const upgradeSessions = new Map();
 
 // TCP 服务器配置
 const TCP_PORT = process.env.TCP_PORT || 55036;
@@ -312,6 +316,12 @@ async function handleCommand(cmd, socket, deviceId) {
 
     case 'WQ': // 水质数据上报
       return await handleWaterQuality(cmd);
+
+    case 'ACK': // 升级确认
+      return await handleUpgradeAck(cmd, deviceId);
+
+    case 'VerReq': // 请求固件数据包
+      return await handleVerReq(cmd, socket, deviceId);
 
     default:
       // 对不认识的命令返回 {ok}
@@ -1105,6 +1115,250 @@ function isDeviceConnected(deviceId) {
 }
 
 // ========================================
+// 固件升级相关处理函数
+// ========================================
+
+/**
+ * ACK - 设备确认升级命令
+ */
+async function handleUpgradeAck(cmd, deviceId) {
+  const { RT, RC } = cmd;
+
+  log(`[TCP] Upgrade ACK from ${deviceId}: RT=${RT}, RC=${RC}`);
+
+  if (RT === 'OK') {
+    // 更新升级任务状态
+    const task = await UpgradeTask.findOne({
+      where: { deviceId, status: 'Pending' },
+      order: [['createdAt', 'DESC']]
+    });
+
+    if (task) {
+      await task.update({ status: 'InProgress', startedAt: new Date() });
+
+      // 推送状态更新
+      websocketService.broadcast({
+        type: 'upgrade_started',
+        data: { taskId: task.id, deviceId, status: 'InProgress' }
+      });
+
+      log(`[TCP] Upgrade task ${task.id} started for device ${deviceId}`);
+    }
+  } else {
+    log(`[TCP] Upgrade rejected by device ${deviceId}: RT=${RT}`);
+  }
+
+  return null; // ACK 不需要回复
+}
+
+/**
+ * VerReq - 设备请求固件数据包
+ * 设备发送: {"Cmd":"VerReq","Ver":"xxx.bin","RecLen":"0","SeqNo":"1"}
+ * 服务器回复: 二进制数据包 0xAA 0xBB CRC8 len SeqNo data 0x0E
+ */
+async function handleVerReq(cmd, socket, deviceId) {
+  const { Ver, RecLen, SeqNo } = cmd;
+  const seqNo = parseInt(SeqNo);
+
+  log(`[TCP] VerReq from ${deviceId}: Ver=${Ver}, SeqNo=${seqNo}, RecLen=${RecLen}`);
+
+  try {
+    // 查找升级任务
+    const task = await UpgradeTask.findOne({
+      where: { deviceId, status: 'InProgress' },
+      include: [{ model: FirmwareVersion, as: 'firmware' }],
+      order: [['createdAt', 'DESC']]
+    });
+
+    if (!task || !task.firmware) {
+      logError(`[TCP] No active upgrade task for ${deviceId}`);
+      return { Cmd: 'VerReq', RT: 'Fail', Msg: 'No active upgrade task' };
+    }
+
+    // 获取或创建升级会话
+    let session = upgradeSessions.get(deviceId);
+    if (!session) {
+      const packets = await splitFileIntoPackets(task.firmware.filePath, 255);
+
+      session = {
+        taskId: task.id,
+        packets,
+        totalPackets: packets.length,
+        currentPacket: 0
+      };
+      upgradeSessions.set(deviceId, session);
+
+      // 更新任务总包数
+      await task.update({ totalPackets: packets.length });
+
+      log(`[TCP] Created upgrade session for ${deviceId}: ${packets.length} packets`);
+    }
+
+    // 检查序号
+    if (seqNo > session.totalPackets) {
+      // 升级完成
+      log(`[TCP] Upgrade completed for ${deviceId}`);
+
+      // 发送完成包: 0xAA 0xBB CRC8 0x00 SeqNo(2bytes) 0x0E
+      const completionPacket = Buffer.alloc(7);
+      completionPacket[0] = 0xAA;
+      completionPacket[1] = 0xBB;
+      completionPacket[2] = 0x00; // CRC8 placeholder
+      completionPacket[3] = 0x00; // len = 0
+      completionPacket[4] = (seqNo >> 8) & 0xFF; // SeqNo high byte
+      completionPacket[5] = seqNo & 0xFF; // SeqNo low byte
+      completionPacket[6] = 0x0E;
+
+      // 计算 CRC8 (len + SeqNo)
+      const crc8 = calculateCRC8(completionPacket.slice(3, 6));
+      completionPacket[2] = crc8;
+
+      socket.write(completionPacket);
+      log(`[TCP] Sent completion packet to ${deviceId}`);
+
+      // 更新任务状态
+      await task.update({
+        status: 'Completed',
+        progress: 100,
+        completedAt: new Date()
+      });
+
+      // 更新设备固件版本
+      await Unit.update(
+        { firmwareVersion: task.firmware.version },
+        { where: { deviceId } }
+      );
+
+      // 清理升级会话
+      upgradeSessions.delete(deviceId);
+
+      // 推送完成通知
+      websocketService.broadcast({
+        type: 'upgrade_completed',
+        data: {
+          taskId: task.id,
+          deviceId,
+          version: task.firmware.version,
+          status: 'Completed'
+        }
+      });
+
+      return null; // 已发送二进制包，不返回JSON
+    }
+
+    // 发送数据包
+    const packetIndex = seqNo - 1; // 数组索引从0开始
+    if (packetIndex < 0 || packetIndex >= session.packets.length) {
+      logError(`[TCP] Invalid packet index ${packetIndex} for ${deviceId}`);
+      return { Cmd: 'VerReq', RT: 'Fail', Msg: 'Invalid packet number' };
+    }
+
+    const dataPacket = session.packets[packetIndex];
+    const len = dataPacket.length;
+
+    // 构造二进制包: 0xAA 0xBB CRC8 len SeqNo data 0x0E
+    const packet = Buffer.alloc(6 + len);
+    packet[0] = 0xAA;
+    packet[1] = 0xBB;
+    packet[2] = 0x00; // CRC8 placeholder
+    packet[3] = len;
+    packet[4] = (seqNo >> 8) & 0xFF; // SeqNo high byte
+    packet[5] = seqNo & 0xFF; // SeqNo low byte
+    dataPacket.copy(packet, 6);
+    packet[6 + len] = 0x0E;
+
+    // 计算 CRC8 (len + SeqNo + data)
+    const crc8 = calculateCRC8(packet.slice(3, 6 + len));
+    packet[2] = crc8;
+
+    // 发送数据包
+    socket.write(packet);
+
+    // 更新进度
+    session.currentPacket = seqNo;
+    const progress = Math.floor((seqNo / session.totalPackets) * 100);
+
+    await task.update({
+      currentPacket: seqNo,
+      progress
+    });
+
+    // 推送进度更新（每10包推送一次，避免过于频繁）
+    if (seqNo % 10 === 0 || seqNo === session.totalPackets) {
+      websocketService.broadcast({
+        type: 'upgrade_progress',
+        data: {
+          taskId: task.id,
+          deviceId,
+          progress,
+          currentPacket: seqNo,
+          totalPackets: session.totalPackets
+        }
+      });
+    }
+
+    log(`[TCP] Sent packet ${seqNo}/${session.totalPackets} to ${deviceId} (${progress}%)`);
+
+    return null; // 已发送二进制包，不返回JSON
+
+  } catch (error) {
+    logError(`[TCP] VerReq error for ${deviceId}:`, error);
+
+    // 更新任务为失败状态
+    const task = await UpgradeTask.findOne({
+      where: { deviceId, status: 'InProgress' },
+      order: [['createdAt', 'DESC']]
+    });
+
+    if (task) {
+      await task.update({
+        status: 'Failed',
+        errorMessage: error.message
+      });
+
+      websocketService.broadcast({
+        type: 'upgrade_failed',
+        data: {
+          taskId: task.id,
+          deviceId,
+          error: error.message
+        }
+      });
+    }
+
+    // 清理会话
+    upgradeSessions.delete(deviceId);
+
+    return { Cmd: 'VerReq', RT: 'Fail', Msg: error.message };
+  }
+}
+
+/**
+ * 主动发送升级命令到设备
+ * @param {string} deviceId - 设备ID
+ * @param {Object} firmwareInfo - 固件信息 {version, crc32, size, fileName}
+ * @returns {Promise<boolean>}
+ */
+async function sendUpgradeCommand(deviceId, firmwareInfo) {
+  const { version, crc32, size, fileName } = firmwareInfo;
+
+  // 生成随机RC码
+  const rc = Math.floor(Math.random() * 10000).toString();
+
+  const command = {
+    Cmd: 'UpgradeVer',
+    Crc: crc32,
+    RC: rc,
+    Size: size.toString(),
+    Ver: fileName
+  };
+
+  log(`[TCP] Sending upgrade command to ${deviceId}:`, command);
+
+  return sendCommandToDevice(deviceId, command);
+}
+
+// ========================================
 // 导出
 // ========================================
 module.exports = {
@@ -1112,6 +1366,7 @@ module.exports = {
   stop,
   deviceConnections,
   sendCommandToDevice,
-  isDeviceConnected
+  isDeviceConnected,
+  sendUpgradeCommand
 };
 

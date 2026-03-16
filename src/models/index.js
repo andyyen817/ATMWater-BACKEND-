@@ -18,6 +18,10 @@ const ProfitSharingLedger = require('./ProfitSharingLedger');
 const ExpenseBreakdown = require('./ExpenseBreakdown');
 const Application = require('./Application');
 
+// 固件升级系统模型
+const FirmwareVersion = require('./FirmwareVersion');
+const UpgradeTask = require('./UpgradeTask');
+
 // ========================================
 // 建立模型关联关系
 // ========================================
@@ -129,6 +133,26 @@ User.hasMany(Application, { foreignKey: 'applicantId', as: 'applications' });
 Application.belongsTo(User, { foreignKey: 'applicantId', as: 'applicant' });
 
 // ========================================
+// 固件升级系统关联关系
+// ========================================
+
+// FirmwareVersion <-> UpgradeTask (一对多)
+FirmwareVersion.hasMany(UpgradeTask, { foreignKey: 'firmwareVersionId', as: 'upgradeTasks' });
+UpgradeTask.belongsTo(FirmwareVersion, { foreignKey: 'firmwareVersionId', as: 'firmware' });
+
+// Unit <-> UpgradeTask (一对多)
+Unit.hasMany(UpgradeTask, { foreignKey: 'unitId', as: 'upgradeTasks' });
+UpgradeTask.belongsTo(Unit, { foreignKey: 'unitId', as: 'unit' });
+
+// User <-> UpgradeTask (发起者关系，一对多)
+User.hasMany(UpgradeTask, { foreignKey: 'initiatedBy', as: 'initiatedUpgrades' });
+UpgradeTask.belongsTo(User, { foreignKey: 'initiatedBy', as: 'initiator' });
+
+// User <-> FirmwareVersion (上传者关系，一对多)
+User.hasMany(FirmwareVersion, { foreignKey: 'uploadedBy', as: 'uploadedFirmwares' });
+FirmwareVersion.belongsTo(User, { foreignKey: 'uploadedBy', as: 'uploader' });
+
+// ========================================
 // 同步数据库（仅开发环境）
 // ========================================
 const syncDatabase = async (options = {}) => {
@@ -160,6 +184,9 @@ module.exports = {
   ProfitSharingLedger,
   ExpenseBreakdown,
   Application,
+  // 固件升级系统模型
+  FirmwareVersion,
+  UpgradeTask,
   syncDatabase
 };
 

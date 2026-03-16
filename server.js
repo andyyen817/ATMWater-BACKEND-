@@ -726,6 +726,9 @@ app.use('/api/cards', require('./src/routes/cardRoutes'));
 // ========================================
 app.use('/api/qr', require('./src/routes/qrRoutes'));
 
+// 固件升级路由
+app.use('/api/firmware', require('./src/routes/firmwareRoutes'));
+
 // ========================================
 // 404 Handler - 返回JSON而不是HTML
 // ========================================
