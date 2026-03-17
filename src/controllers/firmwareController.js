@@ -14,7 +14,7 @@ exports.uploadFirmware = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    const { version, description } = req.body;
+    const { version, description, deviceModel } = req.body;
 
     if (!version) {
       // 删除已上传的文件
@@ -35,6 +35,7 @@ exports.uploadFirmware = async (req, res) => {
     // 创建数据库记录
     const firmware = await FirmwareVersion.create({
       version,
+      deviceModel: deviceModel || 'ATM-ID-1000P',
       fileName: req.file.originalname,
       filePath: req.file.path,
       fileSize: req.file.size,
@@ -49,6 +50,7 @@ exports.uploadFirmware = async (req, res) => {
       data: {
         id: firmware.id,
         version: firmware.version,
+        deviceModel: firmware.deviceModel,
         fileName: firmware.fileName,
         fileSize: firmware.fileSize,
         crc32: firmware.crc32
@@ -273,6 +275,27 @@ exports.cancelUpgradeTask = async (req, res) => {
     res.json({ success: true, message: 'Task cancelled successfully' });
   } catch (error) {
     console.error('[Firmware] Cancel task error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/**
+ * 获取设备型号列表
+ * GET /api/firmware/device-models
+ */
+exports.getDeviceModels = async (req, res) => {
+  try {
+    // 硬编码设备型号列表（根据用户确认）
+    const deviceModels = [
+      {
+        value: 'ATM-ID-1000P',
+        label: 'ATM-ID-1000P'
+      }
+    ];
+
+    res.json({ success: true, data: deviceModels });
+  } catch (error) {
+    console.error('[Firmware] Get device models error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };

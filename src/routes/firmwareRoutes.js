@@ -9,17 +9,21 @@ const {
   filterDevices,
   createBatchUpgrade,
   getUpgradeTasks,
-  cancelUpgradeTask
+  cancelUpgradeTask,
+  getDeviceModels
 } = require('../controllers/firmwareController');
 
 // 所有路由需要管理员权限
 router.use(protect);
-router.use(authorize('Admin', 'Super-Admin'));
+router.use(authorize('Admin', 'Super-Admin', 'GM'));
 
 // 固件管理
 router.post('/upload', upload.single('firmware'), uploadFirmware);
 router.get('/versions', getFirmwareVersions);
 router.delete('/versions/:id', deleteFirmwareVersion);
+
+// 设备型号
+router.get('/device-models', getDeviceModels);
 
 // 设备筛选
 router.post('/filter-devices', filterDevices);

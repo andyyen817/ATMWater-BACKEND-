@@ -39,10 +39,23 @@ const protect = async (req, res, next) => {
 // 传统的静态角色检查
 const authorize = (...roles) => {
     return (req, res, next) => {
+        // 添加调试日志
+        console.log('[Permission Check]', {
+            endpoint: req.path,
+            method: req.method,
+            userRole: req.user?.role,
+            allowedRoles: roles,
+            userId: req.user?.id
+        });
+
         if (!req.user || !roles.includes(req.user.role)) {
-            return res.status(403).json({ 
-                success: false, 
-                message: `User role [${req.user ? req.user.role : 'N/A'}] is not authorized to access this route` 
+            console.error('[Permission Denied]', {
+                userRole: req.user?.role,
+                allowedRoles: roles
+            });
+            return res.status(403).json({
+                success: false,
+                message: `User role [${req.user ? req.user.role : 'N/A'}] is not authorized to access this route`
             });
         }
         next();

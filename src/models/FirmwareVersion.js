@@ -13,6 +13,11 @@ const FirmwareVersion = sequelize.define('FirmwareVersion', {
     unique: true,
     comment: '固件版本号 (e.g., PDP2COMR04.01_210512.bin)'
   },
+  deviceModel: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    comment: '适用设备型号'
+  },
   fileName: {
     type: DataTypes.STRING(255),
     allowNull: false,
