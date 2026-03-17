@@ -31,6 +31,7 @@ router.post('/filter-devices', filterDevices);
 
 // 升级任务管理
 router.post('/upgrade/batch', createBatchUpgrade);
+router.post('/upgrade', createBatchUpgrade); // 前端兼容路由
 router.get('/upgrade/tasks', getUpgradeTasks);
 router.get('/upgrades', getUpgradeTasks); // 前端兼容路由
 router.post('/upgrade/cancel/:taskId', cancelUpgradeTask);

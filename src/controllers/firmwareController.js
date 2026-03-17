@@ -176,7 +176,9 @@ exports.filterDevices = async (req, res) => {
  */
 exports.createBatchUpgrade = async (req, res) => {
   try {
-    const { firmwareVersionId, deviceIds } = req.body;
+    // 兼容前端参数名：firmwareId/firmwareVersionId, unitIds/deviceIds
+    const firmwareVersionId = req.body.firmwareVersionId || req.body.firmwareId;
+    const deviceIds = req.body.deviceIds || req.body.unitIds;
 
     if (!firmwareVersionId || !Array.isArray(deviceIds) || deviceIds.length === 0) {
       return res.status(400).json({ success: false, message: 'Invalid parameters' });
