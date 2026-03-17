@@ -84,7 +84,14 @@ exports.getFirmwareVersions = async (req, res) => {
       order: [['createdAt', 'DESC']]
     });
 
-    res.json({ success: true, data: versions });
+    // 添加 status 字段以兼容前端（基于 isActive）
+    const versionsWithStatus = versions.map(v => {
+      const data = v.toJSON();
+      data.status = data.isActive ? 'active' : 'inactive';
+      return data;
+    });
+
+    res.json({ success: true, data: versionsWithStatus });
   } catch (error) {
     console.error('[Firmware] Get versions error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
