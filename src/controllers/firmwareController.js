@@ -180,22 +180,46 @@ exports.createBatchUpgrade = async (req, res) => {
     const firmwareVersionId = req.body.firmwareVersionId || req.body.firmwareId;
     const deviceIds = req.body.deviceIds || req.body.unitIds;
 
+    console.log('[Firmware] createBatchUpgrade called');
+    console.log('[Firmware] firmwareVersionId:', firmwareVersionId);
+    console.log('[Firmware] deviceIds/unitIds:', deviceIds);
+
     if (!firmwareVersionId || !Array.isArray(deviceIds) || deviceIds.length === 0) {
+      console.error('[Firmware] Invalid parameters');
       return res.status(400).json({ success: false, message: 'Invalid parameters' });
     }
 
     // 验证固件版本
     const firmware = await FirmwareVersion.findByPk(firmwareVersionId);
     if (!firmware || !firmware.isActive) {
+      console.error('[Firmware] Firmware not found or inactive:', firmwareVersionId);
       return res.status(404).json({ success: false, message: 'Firmware not found or inactive' });
     }
 
-    // 查找设备
-    const units = await Unit.findAll({
-      where: { deviceId: { [Op.in]: deviceIds } }
-    });
+    console.log('[Firmware] Firmware found:', firmware.version);
+
+    // 查找设备 - 支持两种查询方式：
+    // 1. 如果传入的是数字 ID，按主键查询
+    // 2. 如果传入的是字符串，按 deviceId 查询
+    const isNumericIds = deviceIds.every(id => typeof id === 'number' || !isNaN(id));
+
+    let units;
+    if (isNumericIds) {
+      console.log('[Firmware] Querying by primary key (id)');
+      units = await Unit.findAll({
+        where: { id: { [Op.in]: deviceIds } }
+      });
+    } else {
+      console.log('[Firmware] Querying by deviceId');
+      units = await Unit.findAll({
+        where: { deviceId: { [Op.in]: deviceIds } }
+      });
+    }
+
+    console.log('[Firmware] Found units:', units.length);
 
     if (units.length === 0) {
+      console.error('[Firmware] No devices found for IDs:', deviceIds);
       return res.status(404).json({ success: false, message: 'No devices found' });
     }
 
@@ -213,6 +237,8 @@ exports.createBatchUpgrade = async (req, res) => {
         })
       )
     );
+
+    console.log('[Firmware] Created tasks:', tasks.length);
 
     res.status(201).json({
       success: true,
