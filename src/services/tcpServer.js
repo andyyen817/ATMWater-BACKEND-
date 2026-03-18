@@ -1163,9 +1163,16 @@ async function handleVerReq(cmd, socket, deviceId) {
   log(`[TCP] VerReq from ${deviceId}: Ver=${Ver}, SeqNo=${seqNo}, RecLen=${RecLen}`);
 
   try {
-    // 查找升级任务
+    const { Op } = require('sequelize');
+
+    // 查找升级任务（同时查找 Pending 和 InProgress 状态）
     const task = await UpgradeTask.findOne({
-      where: { deviceId, status: 'InProgress' },
+      where: {
+        deviceId,
+        status: {
+          [Op.in]: ['Pending', 'InProgress']
+        }
+      },
       include: [{ model: FirmwareVersion, as: 'firmware' }],
       order: [['createdAt', 'DESC']]
     });
@@ -1173,6 +1180,12 @@ async function handleVerReq(cmd, socket, deviceId) {
     if (!task || !task.firmware) {
       logError(`[TCP] No active upgrade task for ${deviceId}`);
       return { Cmd: 'VerReq', RT: 'Fail', Msg: 'No active upgrade task' };
+    }
+
+    // 如果任务还是 Pending 状态，立即更新为 InProgress
+    if (task.status === 'Pending') {
+      await task.update({ status: 'InProgress' });
+      log(`[TCP] 📝 Task ${task.id} status updated: Pending → InProgress`);
     }
 
     // 获取或创建升级会话
