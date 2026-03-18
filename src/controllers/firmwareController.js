@@ -200,9 +200,12 @@ exports.createBatchUpgrade = async (req, res) => {
     console.log('[Firmware] Firmware found:', firmware.version);
 
     // 查找设备 - 支持两种查询方式：
-    // 1. 如果传入的是数字 ID，按主键查询
-    // 2. 如果传入的是字符串，按 deviceId 查询
-    const isNumericIds = deviceIds.every(id => typeof id === 'number' || !isNaN(id));
+    // 1. 如果传入的是小整数（< 10000），按主键 id 查询
+    // 2. 如果传入的是长字符串（IMEI/deviceId），按 deviceId 查询
+    const isNumericIds = deviceIds.every(id => {
+      const num = Number(id);
+      return typeof id === 'number' || (typeof id === 'string' && !isNaN(num) && num < 10000);
+    });
 
     let units;
     if (isNumericIds) {
