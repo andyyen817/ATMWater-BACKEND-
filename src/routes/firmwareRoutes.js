@@ -30,10 +30,10 @@ router.get('/device-models', getDeviceModels);
 router.post('/filter-devices', filterDevices);
 
 // 升级任务管理
-router.post('/upgrade/cancel/:taskId', cancelUpgradeTask);
-router.post('/upgrade/batch', createBatchUpgrade);
-router.post('/upgrade', createBatchUpgrade); // 前端兼容路由
+router.post('/upgrade/batch', createBatchUpgrade);          // 具体路由优先
+router.post('/upgrade', createBatchUpgrade);                // 前端兼容路由
+router.post('/upgrade/cancel/:taskId', cancelUpgradeTask);  // 参数路由放最后
 router.get('/upgrade/tasks', getUpgradeTasks);
-router.get('/upgrades', getUpgradeTasks); // 前端兼容路由
+router.get('/upgrades', getUpgradeTasks);                   // 前端兼容路由
 
 module.exports = router;
