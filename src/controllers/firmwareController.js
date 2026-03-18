@@ -1,5 +1,6 @@
 const { FirmwareVersion, UpgradeTask, Unit, User } = require('../models');
 const { calculateFileCRC32 } = require('../utils/crcUtils');
+const tcpServer = require('../services/tcpServer');
 const path = require('path');
 const fs = require('fs');
 const { Op } = require('sequelize');
@@ -240,10 +241,53 @@ exports.createBatchUpgrade = async (req, res) => {
 
     console.log('[Firmware] Created tasks:', tasks.length);
 
+    // 立即发送升级命令给在线设备
+    const sendResults = await Promise.allSettled(
+      tasks.map(async (task) => {
+        const unit = units.find(u => u.id === task.unitId);
+        if (!unit) return { success: false, reason: 'Unit not found' };
+
+        // 检查设备是否在线
+        const isOnline = tcpServer.isDeviceConnected(unit.deviceId);
+        if (!isOnline) {
+          console.log(`[Firmware] Device ${unit.deviceId} is offline, will send command when it connects`);
+          return { success: false, reason: 'Device offline' };
+        }
+
+        // 发送升级命令
+        const firmwareInfo = {
+          version: firmware.version,
+          crc32: firmware.crc32,
+          size: firmware.fileSize,
+          fileName: firmware.fileName
+        };
+
+        const sent = await tcpServer.sendUpgradeCommand(unit.deviceId, firmwareInfo);
+        if (sent) {
+          console.log(`[Firmware] Upgrade command sent to device ${unit.deviceId}`);
+          return { success: true, deviceId: unit.deviceId };
+        } else {
+          console.log(`[Firmware] Failed to send upgrade command to device ${unit.deviceId}`);
+          return { success: false, reason: 'Send failed' };
+        }
+      })
+    );
+
+    // 统计发送结果
+    const sentCount = sendResults.filter(r => r.status === 'fulfilled' && r.value.success).length;
+    const offlineCount = sendResults.filter(r => r.status === 'fulfilled' && r.value.reason === 'Device offline').length;
+
+    console.log(`[Firmware] Sent upgrade commands: ${sentCount}/${tasks.length}, Offline: ${offlineCount}`);
+
     res.status(201).json({
       success: true,
       message: `Created ${tasks.length} upgrade tasks`,
-      data: { taskCount: tasks.length, tasks }
+      data: {
+        taskCount: tasks.length,
+        tasks,
+        sentCount,
+        offlineCount
+      }
     });
 
   } catch (error) {
