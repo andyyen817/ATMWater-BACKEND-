@@ -404,6 +404,31 @@ exports.retryUpgradeTask = async (req, res) => {
 };
 
 /**
+ * 删除升级任务
+ * DELETE /api/firmware/upgrade/:taskId
+ */
+exports.deleteUpgradeTask = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const task = await UpgradeTask.findByPk(taskId);
+
+    if (!task) {
+      return res.status(404).json({ success: false, message: 'Task not found' });
+    }
+
+    if (['Pending', 'InProgress'].includes(task.status)) {
+      return res.status(400).json({ success: false, message: 'Cannot delete active task. Cancel it first.' });
+    }
+
+    await task.destroy();
+    res.json({ success: true, message: 'Task deleted' });
+  } catch (error) {
+    console.error('[Firmware] Delete task error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/**
  * 获取设备型号列表
  * GET /api/firmware/device-models
  */

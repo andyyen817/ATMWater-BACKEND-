@@ -11,6 +11,7 @@ const {
   getUpgradeTasks,
   cancelUpgradeTask,
   retryUpgradeTask,
+  deleteUpgradeTask,
   getDeviceModels
 } = require('../controllers/firmwareController');
 
@@ -38,6 +39,7 @@ router.get('/upgrade/tasks', getUpgradeTasks);
 router.get('/upgrades', getUpgradeTasks);             // 前端兼容路由
 router.post('/upgrade/:taskId/cancel', cancelUpgradeTask);  // 前端调用格式
 router.post('/upgrade/:taskId/retry', retryUpgradeTask);    // 前端调用格式
+router.delete('/upgrade/:taskId', deleteUpgradeTask);       // 删除已完成/失败任务
 router.post('/upgrade/cancel/:taskId', cancelUpgradeTask);  // 旧格式兼容
 
 module.exports = router;
