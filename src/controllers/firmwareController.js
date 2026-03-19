@@ -4,7 +4,6 @@ const tcpServer = require('../services/tcpServer');
 const path = require('path');
 const fs = require('fs');
 const { Op } = require('sequelize');
-const { v4: uuidv4 } = require('uuid');
 
 /**
  * 上传固件文件
@@ -186,10 +185,6 @@ exports.createBatchUpgrade = async (req, res) => {
     console.log('[Firmware] firmwareVersionId:', firmwareVersionId);
     console.log('[Firmware] deviceIds/unitIds:', deviceIds);
 
-    // 生成批次ID
-    const batchId = uuidv4();
-    console.log('[Firmware] batchId:', batchId);
-
     if (!firmwareVersionId || !Array.isArray(deviceIds) || deviceIds.length === 0) {
       console.error('[Firmware] Invalid parameters');
       return res.status(400).json({ success: false, message: 'Invalid parameters' });
@@ -242,8 +237,7 @@ exports.createBatchUpgrade = async (req, res) => {
           versionBefore: unit.firmwareVersion,
           versionAfter: firmware.version,
           initiatedBy: req.user.id,
-          status: 'Pending',
-          batchId
+          status: 'Pending'
         })
       )
     );
