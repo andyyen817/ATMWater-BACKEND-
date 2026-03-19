@@ -450,6 +450,7 @@ async function handleAuth(cmd) {
 // ========================================
 async function handleHeartbeat(cmd) {
   const { DId, Errs } = cmd;
+  const fullDeviceId = DId + '0001';
 
   try {
     const updateData = {
@@ -468,7 +469,7 @@ async function handleHeartbeat(cmd) {
     }
 
     // 更新设备心跳时间和状态
-    await Unit.update(updateData, { where: { deviceId: DId } });
+    await Unit.update(updateData, { where: { deviceId: fullDeviceId } });
 
     // 返回简单响应（硬件协议格式）
     return {
@@ -486,10 +487,11 @@ async function handleHeartbeat(cmd) {
 // ========================================
 async function handleSwipeWater(cmd) {
   const { DId, RFID, Vol, Price } = cmd;
+  const fullDeviceId = DId + '0001';
 
   try {
     // 1. 查找设备
-    const unit = await Unit.findOne({ where: { deviceId: DId } });
+    const unit = await Unit.findOne({ where: { deviceId: fullDeviceId } });
     if (!unit) {
       return {
         Cmd: 'SW',
@@ -587,6 +589,7 @@ async function handleSwipeWater(cmd) {
 // ========================================
 async function handleDeviceStatus(cmd) {
   const { DId, Status, ErrorCode } = cmd;
+  const fullDeviceId = DId + '0001';
 
   try {
     const updateData = {
@@ -597,7 +600,7 @@ async function handleDeviceStatus(cmd) {
       updateData.status = Status;
     }
 
-    await Unit.update(updateData, { where: { deviceId: DId } });
+    await Unit.update(updateData, { where: { deviceId: fullDeviceId } });
 
     return {
       Cmd: 'DS',
@@ -615,6 +618,7 @@ async function handleDeviceStatus(cmd) {
 // ========================================
 async function handleWaterQuality(cmd) {
   const { DId, TDS, Temp } = cmd;
+  const fullDeviceId = DId + '0001';
 
   try {
     await Unit.update(
@@ -623,7 +627,7 @@ async function handleWaterQuality(cmd) {
         temperature: Temp,
         lastHeartbeatAt: new Date()
       },
-      { where: { deviceId: DId } }
+      { where: { deviceId: fullDeviceId } }
     );
 
     return {
@@ -880,9 +884,10 @@ async function handleWaterRecord(cmd, deviceId) {
 // ========================================
 async function handleMakeWater(cmd) {
   const { DId, FT, PWM, TDS, IDS, RC } = cmd;
+  const fullDeviceId = DId + '0001';
 
   try {
-    const unit = await Unit.findOne({ where: { deviceId: DId } });
+    const unit = await Unit.findOne({ where: { deviceId: fullDeviceId } });
 
     if (!unit) {
       return {
