@@ -406,15 +406,16 @@ async function handleAuth(cmd) {
       timestamp: new Date()
     });
 
-    // 检查是否有 Pending 升级任务，有则立即发送升级命令
+    // 检查是否有 Pending/InProgress 升级任务，有则立即发送升级命令
     try {
+      const { Op } = require('sequelize');
       const pendingTask = await UpgradeTask.findOne({
-        where: { deviceId: fullDeviceId, status: 'Pending' },
+        where: { deviceId: fullDeviceId, status: { [Op.in]: ['Pending', 'InProgress'] } },
         include: [{ model: FirmwareVersion, as: 'firmware' }],
         order: [['createdAt', 'DESC']]
       });
       if (pendingTask && pendingTask.firmware) {
-        log(`[TCP] 📦 Pending upgrade task found for ${fullDeviceId}, sending UpgradeVer command`);
+        log(`[TCP] 📦 Active upgrade task found (${pendingTask.status}) for ${fullDeviceId}, sending UpgradeVer command`);
         setTimeout(() => {
           sendUpgradeCommand(fullDeviceId, {
             version: pendingTask.firmware.version,
