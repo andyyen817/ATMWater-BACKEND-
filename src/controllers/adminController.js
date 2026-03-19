@@ -911,6 +911,47 @@ exports.getAllUnits = async (req, res) => {
 };
 
 /**
+ * @desc    创建新设备
+ * @route   POST /api/admin/units
+ */
+exports.createUnit = async (req, res) => {
+    try {
+        const { deviceId, deviceName, password, location, deviceType, imei } = req.body;
+
+        if (!deviceId || !password) {
+            return res.status(400).json({ success: false, message: 'deviceId and password are required' });
+        }
+
+        // If raw 20-digit IMEI is provided, append '0001' to form the full deviceId
+        const fullDeviceId = /^\d{20}$/.test(deviceId) ? deviceId + '0001' : deviceId;
+
+        const [unit, created] = await Unit.findOrCreate({
+            where: { deviceId: fullDeviceId },
+            defaults: {
+                deviceName: deviceName || null,
+                deviceType: deviceType || 'WaterDispenser',
+                password,
+                location: location || null,
+                imei: imei || null,
+                status: 'Offline',
+                isActive: true,
+                pricePerLiter: 500.00,
+                pulsePerLiter: 1.0
+            }
+        });
+
+        if (!created) {
+            return res.status(409).json({ success: false, message: 'Device already exists', data: unit });
+        }
+
+        res.status(201).json({ success: true, message: 'Device registered successfully', data: unit });
+    } catch (error) {
+        console.error('Create Unit Error:', error);
+        res.status(500).json({ success: false, message: 'Server Error', error: error.message });
+    }
+};
+
+/**
  * @desc    远程控制设备 (锁定/解锁) [P1-WEB-002]
  * @route   POST /api/admin/units/:id/control
  */

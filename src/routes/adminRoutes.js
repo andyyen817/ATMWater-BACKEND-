@@ -3,6 +3,7 @@ const router = express.Router();
 const {
     getDashboardStats,
     getAllUnits,
+    createUnit,
     getUnitDetail,
     controlUnit,
     importRenrenDevice,
@@ -28,6 +29,9 @@ router.get('/dashboard-stats', authorize('Admin', 'Super-Admin', 'GM', 'Business
 
 // 2. 获取所有设备列表 (管理员可访问)
 router.get('/units', authorize('Admin', 'Super-Admin', 'GM', 'Business', 'Steward', 'RP'), getAllUnits);
+
+// 2.0 创建新设备
+router.post('/units', authorize('Admin', 'Super-Admin'), createUnit);
 
 // 2.0.1 设备 QR 码生成（必须在 /units/:id 之前，否则会被 :id 拦截）
 router.get('/units/qrcodes/batch', authorize('Super-Admin', 'GM'), generateBatchQR);

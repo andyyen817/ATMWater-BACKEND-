@@ -458,9 +458,8 @@ async function handleHeartbeat(cmd) {
       status: 'Online'
     };
 
-    // 处理告警信息
+    // 处理告警信息（Errs 为业务告警，不影响连接状态）
     if (Errs && Array.isArray(Errs) && Errs.length > 0) {
-      updateData.status = 'Error';
       updateData.errorCodes = JSON.stringify(Errs);
       log(`[TCP] ⚠️ Device errors: ${DId}`, Errs);
     } else {
