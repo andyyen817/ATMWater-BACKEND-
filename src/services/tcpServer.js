@@ -1292,7 +1292,7 @@ async function handleVerReq(cmd, socket, deviceId) {
     const len = dataPacket.length;
 
     // 构造二进制包: 0xAA 0xBB CRC8 len SeqNo data 0x0E
-    const packet = Buffer.alloc(6 + len);
+    const packet = Buffer.alloc(7 + len);
     packet[0] = 0xAA;
     packet[1] = 0xBB;
     packet[2] = 0x00; // CRC8 placeholder
