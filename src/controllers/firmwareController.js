@@ -4,6 +4,7 @@ const tcpServer = require('../services/tcpServer');
 const path = require('path');
 const fs = require('fs');
 const { Op } = require('sequelize');
+const { v4: uuidv4 } = require('uuid');
 
 /**
  * 上传固件文件
@@ -185,6 +186,10 @@ exports.createBatchUpgrade = async (req, res) => {
     console.log('[Firmware] firmwareVersionId:', firmwareVersionId);
     console.log('[Firmware] deviceIds/unitIds:', deviceIds);
 
+    // 生成批次ID
+    const batchId = uuidv4();
+    console.log('[Firmware] batchId:', batchId);
+
     if (!firmwareVersionId || !Array.isArray(deviceIds) || deviceIds.length === 0) {
       console.error('[Firmware] Invalid parameters');
       return res.status(400).json({ success: false, message: 'Invalid parameters' });
@@ -237,7 +242,8 @@ exports.createBatchUpgrade = async (req, res) => {
           versionBefore: unit.firmwareVersion,
           versionAfter: firmware.version,
           initiatedBy: req.user.id,
-          status: 'Pending'
+          status: 'Pending',
+          batchId
         })
       )
     );
@@ -357,6 +363,48 @@ exports.cancelUpgradeTask = async (req, res) => {
     res.json({ success: true, message: 'Task cancelled successfully' });
   } catch (error) {
     console.error('[Firmware] Cancel task error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/**
+ * 重试升级任务
+ * POST /api/firmware/upgrade/:taskId/retry
+ */
+exports.retryUpgradeTask = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+
+    const task = await UpgradeTask.findByPk(taskId, {
+      include: [{ model: FirmwareVersion, as: 'firmware' }]
+    });
+    if (!task) {
+      return res.status(404).json({ success: false, message: 'Task not found' });
+    }
+
+    if (!['Failed', 'Cancelled'].includes(task.status)) {
+      return res.status(400).json({ success: false, message: 'Can only retry Failed or Cancelled tasks' });
+    }
+
+    await task.update({ status: 'Pending', errorMessage: null, progress: 0, currentPacket: 0, startedAt: null, completedAt: null });
+
+    // 尝试发送升级命令
+    if (task.firmware) {
+      try {
+        await tcpServer.sendUpgradeCommand(task.deviceId, {
+          version: task.firmware.version,
+          crc32: task.firmware.crc32,
+          size: task.firmware.fileSize,
+          fileName: task.firmware.fileName
+        });
+      } catch (e) {
+        console.log(`[Firmware] Device ${task.deviceId} offline, retry task queued`);
+      }
+    }
+
+    res.json({ success: true, message: 'Task queued for retry' });
+  } catch (error) {
+    console.error('[Firmware] Retry task error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };

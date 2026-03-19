@@ -77,6 +77,11 @@ const UpgradeTask = sequelize.define('UpgradeTask', {
       model: 'users',
       key: 'id'
     }
+  },
+  batchId: {
+    type: DataTypes.STRING(36),
+    allowNull: true,
+    comment: '批次ID（同一次批量部署共用同一个UUID）'
   }
 }, {
   tableName: 'upgrade_tasks',
@@ -87,7 +92,8 @@ const UpgradeTask = sequelize.define('UpgradeTask', {
     { fields: ['unit_id'] },
     { fields: ['device_id'] },
     { fields: ['status'] },
-    { fields: ['created_at'] }
+    { fields: ['created_at'] },
+    { fields: ['batch_id'] }
   ]
 });
 
