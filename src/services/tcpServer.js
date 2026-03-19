@@ -406,6 +406,28 @@ async function handleAuth(cmd) {
       timestamp: new Date()
     });
 
+    // 检查是否有 Pending 升级任务，有则立即发送升级命令
+    try {
+      const pendingTask = await UpgradeTask.findOne({
+        where: { deviceId: fullDeviceId, status: 'Pending' },
+        include: [{ model: FirmwareVersion, as: 'firmware' }],
+        order: [['createdAt', 'DESC']]
+      });
+      if (pendingTask && pendingTask.firmware) {
+        log(`[TCP] 📦 Pending upgrade task found for ${fullDeviceId}, sending UpgradeVer command`);
+        setTimeout(() => {
+          sendUpgradeCommand(fullDeviceId, {
+            version: pendingTask.firmware.version,
+            crc32: pendingTask.firmware.crc32,
+            size: pendingTask.firmware.fileSize,
+            fileName: pendingTask.firmware.fileName
+          }).catch(e => logError('[TCP] Failed to send upgrade command on reconnect:', e.message));
+        }, 1000);
+      }
+    } catch (e) {
+      logError('[TCP] Error checking pending upgrade task:', e.message);
+    }
+
     // 返回服务器时间戳（硬件协议格式）
     return {
       Cmd: 'AU',
