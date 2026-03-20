@@ -138,7 +138,8 @@ exports.dispenseByQR = async (req, res) => {
 
     // 12. 发送 OpenWater TCP 命令
     // 12. 发送 OpenWater TCP 命令
-    const hwType = waterType === 'pure' ? 'RO' : 'UF';
+    // 按IOT协议：Type=0 → 纯净水(RO)，Type=1 → 矿物质水(UF)
+    const hwType = waterType === 'pure' ? '0' : '1';
     console.log(`[QR Dispense] 🔍 About to send OpenWater: tcpConnected=${tcpConnected}, deviceId=${targetDeviceId}, RFID=${user.virtualRfid}, Type=${hwType}, PWM=${pwm}, RE=${recordId}`);
 
     // 优先使用 TCP 连接，如果不存在则标记为云端处理

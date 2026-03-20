@@ -699,20 +699,46 @@ exports.getUnitDetail = async (req, res) => {
             console.warn('Failed to fetch maintenance logs:', error.message);
         }
 
-        // 4. 构建响应数据（匹配前端期望）
+        // 4. 查询用水交易记录（最近50条）
+        let transactions = [];
+        try {
+            const Transaction = require('../models/Transaction');
+            const txList = await Transaction.findAll({
+                where: { deviceId: unit.deviceId },
+                order: [['createdAt', 'DESC']],
+                limit: 50,
+                include: [{ model: User, as: 'user', attributes: ['id', 'name', 'phone'] }],
+                attributes: ['id', 'createdAt', 'volume', 'amount', 'rfid', 'description', 'status', 'pulseCount', 'cardType']
+            });
+            transactions = txList.map(t => ({
+                id: t.id,
+                time: t.createdAt,
+                userPhone: t.user?.phone || t.rfid || '--',
+                userName: t.user?.name || '--',
+                volume: t.volume || '--',
+                amount: t.amount || 0,
+                waterType: t.description?.includes('RO') ? '纯净水' : (t.description?.includes('UF') ? '矿物质水' : '--'),
+                status: t.status
+            }));
+        } catch (txError) {
+            console.warn('Failed to fetch transactions:', txError.message);
+        }
+
+        // 5. 构建响应数据（匹配前端期望）
         const responseData = {
             unitId: unit.deviceId,
+            deviceId: unit.deviceId,
             locationName: unit.deviceName || unit.location || 'Unknown Location',
             location: unit.location,
             latitude: unit.latitude,
             longitude: unit.longitude,
-            status: unit.status === 'Online' ? 'Active' : unit.status,
+            status: unit.status,  // 保持原始状态值，不做转换
 
-            // 嵌套的传感器对象
+            // 嵌套的传感器对象（无真实数据时返回 null，不返回假数据）
             sensors: {
-                pureTDS: latestWaterQuality?.pureTds || unit.tdsValue || 0,
-                ph: latestWaterQuality?.ph || 7.0,
-                temp: latestWaterQuality?.temperature || unit.temperature || 25
+                pureTDS: latestWaterQuality?.pureTds || unit.tdsValue || null,
+                ph: latestWaterQuality?.ph || null,
+                temp: latestWaterQuality?.temperature || unit.temperature || null
             },
 
             // 滤芯状态（暂时为空数组）
@@ -720,6 +746,9 @@ exports.getUnitDetail = async (req, res) => {
 
             // 维护日志
             logs: maintenanceLogs,
+
+            // 用水交易记录
+            transactions,
 
             // 管家信息
             steward: unit.steward ? {
