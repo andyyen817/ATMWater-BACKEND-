@@ -6,7 +6,7 @@ const fs = require('fs');
  * @returns {string} - CRC32 十进制字符串
  */
 function calculateCRC32(buffer) {
-  let ret = 0;
+  let ret = BigInt(0);
   let i = 0;
   let len = buffer.length;
 
@@ -15,13 +15,13 @@ function calculateCRC32(buffer) {
     len = len - step;
 
     for (let k = step - 1; k >= 0; k--) {
-      let value = buffer[i];
-      ret = ret + (value << (8 * k));
+      let value = BigInt(buffer[i]);
+      ret = ret + (value << BigInt(8 * k));
       i = i + 1;
     }
   }
 
-  return (ret >>> 0).toString(); // 转为无符号32位整数并转字符串
+  return (ret & BigInt(0xFFFFFFFF)).toString(); // 取低32位转字符串（避免JS位运算32位溢出）
 }
 
 /**

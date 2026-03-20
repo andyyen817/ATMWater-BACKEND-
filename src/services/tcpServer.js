@@ -17,6 +17,39 @@ const TCP_PORT = process.env.TCP_PORT || 55036;
 const HEARTBEAT_TIMEOUT = 180000; // 180秒超时 (硬件心跳间隔90秒 + 90秒容错)
 
 // ========================================
+// 工具函数：构造完整 deviceId
+// 设备上报的 DId 有两种情况：
+//   1) 20位IMEI（如 89852342022259861275）→ 需拼接 "0001" → 24位
+//   2) 24位（如 898608311123900885420001，已含"0001"）→ 直接使用
+// ========================================
+function buildFullDeviceId(did) {
+  if (!did) return did;
+  return did.endsWith('0001') ? did : did + '0001';
+}
+
+// ========================================
+// 工具函数：栈式 JSON 对象提取
+// 原正则 /\{[^}]*\}/g 无法处理嵌套 {}，改用栈式匹配
+// ========================================
+function extractJsonObjects(str) {
+  const results = [];
+  let depth = 0, start = -1;
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (str[i] === '}') {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        results.push(str.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return results;
+}
+
+// ========================================
 // 时间戳工具函数
 // ========================================
 function getTimestamp() {
@@ -161,8 +194,8 @@ const server = net.createServer((socket) => {
 
         // 提取所有JSON对象：硬件可能在一条消息中发送多个JSON
         // 例如：{"Cmd":"GT","DId":"xxx"}{"Cmd":"AU","DId":"xxx","Pwd":"pudow"}
-        // 使用全局匹配提取所有JSON对象
-        const jsonMatches = cleanMessage.match(/\{[^}]*\}/g);
+        // 使用栈式括号匹配，支持嵌套 JSON（原正则 /\{[^}]*\}/g 无法处理嵌套）
+        const jsonMatches = extractJsonObjects(cleanMessage);
 
         log(`[TCP] 🧹 Original message length:`, message.length);
         log(`[TCP] 🧹 Clean message length:`, cleanMessage.length);
@@ -199,9 +232,14 @@ const server = net.createServer((socket) => {
                 }
               }
 
-              // 【方案2】如果已认证，每次收到消息都重置心跳
-              if (isAuthenticated && cmd.Cmd === 'HB') {
+              // 已认证后，任何命令都重置心跳（防止设备只发非HB命令时被超时断开）
+              if (isAuthenticated) {
                 resetHeartbeat();
+              }
+
+              // VerReq 的响应由 handleVerReq 内部直接发送二进制包，主循环不处理
+              if (cmd.Cmd === 'VerReq') {
+                continue;
               }
 
               if (response) {
@@ -226,10 +264,9 @@ const server = net.createServer((socket) => {
                 log(`[TCP] ⏱️ Total response time (process + send): ${Date.now() - cmdStartTime}ms`);
               }
 
-              // 更新设备ID
+              // 更新设备ID（使用 buildFullDeviceId 防止重复拼接 0001）
               if (cmd.DId) {
-                // 构造完整的deviceId：IMEI + "0001"
-                deviceId = cmd.DId + '0001';
+                deviceId = buildFullDeviceId(cmd.DId);
                 deviceConnections.set(deviceId, socket);
                 log(`[TCP] 📱 Device ID constructed: ${deviceId} (IMEI: ${cmd.DId})`);
               }
@@ -357,8 +394,7 @@ async function handleAuth(cmd) {
   const { DId, Type, Pwd, Ver, PosX, PosY, CSQ, crc } = cmd;
 
   try {
-    // 构造完整的deviceId：IMEI + "0001"
-    const fullDeviceId = DId + '0001';
+    const fullDeviceId = buildFullDeviceId(DId);
 
     // 查询设备
     const unit = await Unit.findOne({ where: { deviceId: fullDeviceId } });
@@ -449,14 +485,18 @@ async function handleAuth(cmd) {
 // HB - 心跳
 // ========================================
 async function handleHeartbeat(cmd) {
-  const { DId, Errs } = cmd;
-  const fullDeviceId = DId + '0001';
+  const { DId, Errs, TdsP1, TdsP2, TMax, POWER } = cmd;
+  const fullDeviceId = buildFullDeviceId(DId);
 
   try {
     const updateData = {
       lastHeartbeatAt: new Date(),
       status: 'Online'
     };
+
+    // 保存水质数据（从心跳字段读取真实数据）
+    if (TdsP1 !== undefined) updateData.tdsValue = parseInt(TdsP1) || 0;
+    if (TMax !== undefined) updateData.temperature = parseFloat(TMax) || null;
 
     // 处理告警信息（Errs 为业务告警，不影响连接状态）
     if (Errs && Array.isArray(Errs) && Errs.length > 0) {
@@ -467,8 +507,17 @@ async function handleHeartbeat(cmd) {
       updateData.errorCodes = null;
     }
 
-    // 更新设备心跳时间和状态
+    // 更新设备心跳时间、状态和水质数据
     await Unit.update(updateData, { where: { deviceId: fullDeviceId } });
+
+    // 推送水质更新到前端管理后台
+    websocketService.sendDeviceUpdate(fullDeviceId, {
+      status: 'Online',
+      tds: TdsP1 !== undefined ? (parseInt(TdsP1) || 0) : undefined,
+      temperature: TMax !== undefined ? (parseFloat(TMax) || null) : undefined,
+      power: POWER,
+      errors: Errs
+    });
 
     // 返回简单响应（硬件协议格式）
     return {
@@ -486,7 +535,7 @@ async function handleHeartbeat(cmd) {
 // ========================================
 async function handleSwipeWater(cmd) {
   const { DId, RFID, Vol, Price } = cmd;
-  const fullDeviceId = DId + '0001';
+  const fullDeviceId = buildFullDeviceId(DId);
 
   try {
     // 1. 查找设备
@@ -588,7 +637,7 @@ async function handleSwipeWater(cmd) {
 // ========================================
 async function handleDeviceStatus(cmd) {
   const { DId, Status, ErrorCode } = cmd;
-  const fullDeviceId = DId + '0001';
+  const fullDeviceId = buildFullDeviceId(DId);
 
   try {
     const updateData = {
@@ -617,7 +666,7 @@ async function handleDeviceStatus(cmd) {
 // ========================================
 async function handleWaterQuality(cmd) {
   const { DId, TDS, Temp } = cmd;
-  const fullDeviceId = DId + '0001';
+  const fullDeviceId = buildFullDeviceId(DId);
 
   try {
     await Unit.update(
@@ -883,7 +932,7 @@ async function handleWaterRecord(cmd, deviceId) {
 // ========================================
 async function handleMakeWater(cmd) {
   const { DId, FT, PWM, TDS, IDS, RC } = cmd;
-  const fullDeviceId = DId + '0001';
+  const fullDeviceId = buildFullDeviceId(DId);
 
   try {
     const unit = await Unit.findOne({ where: { deviceId: fullDeviceId } });
@@ -1079,7 +1128,21 @@ async function updateDeviceStatus(deviceId, status) {
 // ========================================
 // 启动 TCP 服务器
 // ========================================
-function start() {
+async function start() {
+  // 服务器启动时重置卡住的升级任务
+  // upgradeSessions 是内存Map，重启后丢失；将 InProgress 重置为 Pending 确保设备重连后能继续升级
+  try {
+    const resetCount = await UpgradeTask.update(
+      { status: 'Pending', currentPacket: 0, progress: 0 },
+      { where: { status: 'InProgress' } }
+    );
+    if (resetCount[0] > 0) {
+      log(`[TCP] 🔄 Reset ${resetCount[0]} stale InProgress upgrade task(s) to Pending`);
+    }
+  } catch (e) {
+    logError('[TCP] Failed to reset stale upgrade tasks:', e.message);
+  }
+
   server.listen(TCP_PORT, '0.0.0.0', () => {
     log(`[TCP] ✅ Server listening on port ${TCP_PORT}`);
   });

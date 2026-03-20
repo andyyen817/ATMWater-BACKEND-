@@ -12,7 +12,8 @@ const { calculateAndSplitProfit } = require('../services/profitSharing/waterCoin
  * 支持两种模式：1) 扫码传 qrCode  2) 手动输入传 deviceId
  */
 exports.dispenseByQR = async (req, res) => {
-  const { qrCode, waterType, amount, deviceId: directDeviceId } = req.body;
+  const { qrCode, amount, deviceId: directDeviceId } = req.body;
+  let { waterType } = req.body;
   const userId = req.user.id;
 
   try {
@@ -27,6 +28,16 @@ exports.dispenseByQR = async (req, res) => {
         return res.status(400).json({ success: false, message: qrResult.error });
       }
       targetDeviceId = qrResult.deviceId;
+      // 如果 QR 码包含出水口编号，以出水口编号为准覆盖客户端传来的 waterType
+      // 出水口 1 = 矿物质水(mineral), 出水口 2 = 纯净水(pure)
+      if (qrResult.outletNo !== undefined) {
+        const outletWaterType = qrResult.outletNo === 1 ? 'mineral' : 'pure';
+        if (waterType && waterType !== outletWaterType) {
+          console.warn(`[QR Dispense] waterType mismatch: client=${waterType}, outlet=${outletWaterType}. Using outlet.`);
+        }
+        waterType = outletWaterType;
+        console.log(`[QR Dispense] OutletNo=${qrResult.outletNo} → waterType=${waterType}`);
+      }
     } else {
       return res.status(400).json({ success: false, message: 'Missing qrCode or deviceId' });
     }
