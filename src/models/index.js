@@ -22,6 +22,9 @@ const Application = require('./Application');
 const FirmwareVersion = require('./FirmwareVersion');
 const UpgradeTask = require('./UpgradeTask');
 
+// 审计日志模型
+const AuditLog = require('./AuditLog');
+
 // ========================================
 // 建立模型关联关系
 // ========================================
@@ -187,6 +190,8 @@ module.exports = {
   // 固件升级系统模型
   FirmwareVersion,
   UpgradeTask,
+  // 审计日志模型
+  AuditLog,
   syncDatabase
 };
 
