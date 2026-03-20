@@ -64,12 +64,26 @@ function getTimestamp() {
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${ms}`;
 }
 
+// ========================================
+// 全局日志缓冲区（供管理后台实时日志页使用）
+// ========================================
+const logBuffer = [];
+const MAX_LOG_BUFFER = 500;
+function pushLog(level, message) {
+  logBuffer.push({ time: new Date().toISOString(), level, message });
+  if (logBuffer.length > MAX_LOG_BUFFER) logBuffer.shift();
+}
+
 function log(...args) {
-  console.log(`[${getTimestamp()}]`, ...args);
+  const message = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+  console.log(`[${getTimestamp()}]`, message);
+  pushLog('info', message);
 }
 
 function logError(...args) {
-  console.error(`[${getTimestamp()}]`, ...args);
+  const message = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+  console.error(`[${getTimestamp()}]`, message);
+  pushLog('error', message);
 }
 
 // ========================================
@@ -707,7 +721,7 @@ async function handleWaterRecord(cmd, deviceId) {
   // 注意：某些设备固件会忽略 RE 字段，回传自己的内部编号，所以需要 fallback 匹配
   let qrTransaction = null;
 
-  if (RE && RE.startsWith('QR_')) {
+  if (RE) {
     try {
       qrTransaction = await Transaction.findOne({ where: { recordId: RE, status: 'Pending' } });
     } catch (err) {
@@ -1470,6 +1484,7 @@ module.exports = {
   deviceConnections,
   sendCommandToDevice,
   isDeviceConnected,
-  sendUpgradeCommand
+  sendUpgradeCommand,
+  logBuffer
 };
 

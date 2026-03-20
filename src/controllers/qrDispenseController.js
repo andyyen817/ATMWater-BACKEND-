@@ -202,7 +202,7 @@ exports.dispenseByQR = async (req, res) => {
       } catch (err) {
         console.error('[QR Dispense] Timeout handler error:', err.message);
       }
-    }, 300000);
+    }, 600000);
 
     // 15. 返回结果（余额已扣除，等待设备处理）
     return res.status(200).json({

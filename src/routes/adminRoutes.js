@@ -16,7 +16,8 @@ const {
     getUserRecharges,
     getUserCards,
     getPermissions,
-    updatePermissions
+    updatePermissions,
+    getRuntimeLogs
 } = require('../controllers/adminController');
 const { generateDeviceQR, generateBatchQR } = require('../controllers/qrCodeController');
 const { protect, authorize, checkPermission } = require('../middleware/authMiddleware');
@@ -63,6 +64,9 @@ router.post('/units/:id/control', checkPermission('manage_units'), controlUnit);
 // 4. 权限管理 (仅限 Super-Admin，不使用矩阵控制以防把自己锁死)
 router.get('/permissions', authorize('Super-Admin'), getPermissions);
 router.post('/permissions', authorize('Super-Admin'), updatePermissions);
+
+// 5. 实时运行日志
+router.get('/logs/runtime', authorize('Super-Admin', 'Admin'), getRuntimeLogs);
 
 module.exports = router;
 

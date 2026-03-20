@@ -736,9 +736,9 @@ exports.getUnitDetail = async (req, res) => {
 
             // 嵌套的传感器对象（无真实数据时返回 null，不返回假数据）
             sensors: {
-                pureTDS: latestWaterQuality?.pureTds || unit.tdsValue || null,
+                pureTDS: unit.tdsValue || latestWaterQuality?.pureTds || null,
                 ph: latestWaterQuality?.ph || null,
-                temp: latestWaterQuality?.temperature || unit.temperature || null
+                temp: unit.temperature || latestWaterQuality?.temperature || null
             },
 
             // 滤芯状态（暂时为空数组）
@@ -1126,4 +1126,13 @@ exports.importRenrenDevice = async (req, res) => {
             error: error.message
         });
     }
+};
+
+exports.getRuntimeLogs = (req, res) => {
+    const { logBuffer } = require('../services/tcpServer');
+    const limit = Math.min(parseInt(req.query.limit) || 200, 500);
+    const since = req.query.since ? new Date(req.query.since) : null;
+    let logs = logBuffer;
+    if (since) logs = logs.filter(l => new Date(l.time) > since);
+    res.json({ success: true, data: logs.slice(-limit) });
 };
