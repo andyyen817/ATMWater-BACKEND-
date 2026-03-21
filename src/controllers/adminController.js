@@ -713,8 +713,10 @@ exports.getUnitDetail = async (req, res) => {
             transactions = txList.map(t => ({
                 id: t.id,
                 time: t.createdAt,
+                userName: t.user?.name || (t.cardType === 'Physical' ? `物理卡 ${t.rfid}` : '--'),
                 userPhone: t.user?.phone || t.rfid || '--',
-                userName: t.user?.name || '--',
+                cardType: t.cardType || 'Virtual',
+                rfid: t.rfid || '--',
                 volume: t.volume || '--',
                 amount: t.amount || 0,
                 waterType: t.description?.includes('RO') ? '纯净水' : (t.description?.includes('UF') ? '矿物质水' : '--'),

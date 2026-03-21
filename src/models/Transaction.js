@@ -14,8 +14,8 @@ const Transaction = sequelize.define('Transaction', {
   // ========== 用户信息 ==========
   userId: {
     type: DataTypes.INTEGER,
-    allowNull: false,
-    comment: '用户ID（外键）',
+    allowNull: true,  // 允许null：物理卡独立消费（未绑定App用户）时userId为null
+    comment: '用户ID（外键，物理卡独立消费时为null）',
     references: {
       model: 'users',
       key: 'id'
