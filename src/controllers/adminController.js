@@ -1130,7 +1130,7 @@ exports.importRenrenDevice = async (req, res) => {
 
 exports.getRuntimeLogs = (req, res) => {
     const { logBuffer } = require('../services/tcpServer');
-    const limit = Math.min(parseInt(req.query.limit) || 200, 500);
+    const limit = Math.min(parseInt(req.query.limit) || 5000, 100000);
     const since = req.query.since ? new Date(req.query.since) : null;
     let logs = logBuffer;
     if (since) logs = logs.filter(l => new Date(l.time) > since);

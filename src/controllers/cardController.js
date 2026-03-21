@@ -226,12 +226,12 @@ exports.linkCard = async (req, res) => {
         }
 
         // 验证RFID卡号格式（一位字母+八位数字）
-        if (!/^[A-Za-z][0-9]{8}$/.test(rfidCard)) {
+        if (!/^([A-Za-z][0-9]{8}|[0-9A-Fa-f]{4,16})$/.test(rfidCard)) {
             console.warn(`[Card Link] Invalid RFID format: ${rfidCard}`);
             return res.status(400).json({
                 success: false,
                 error: 'INVALID_CARD_FORMAT',
-                message: 'Invalid RFID card number format. Expected: 1 letter + 8 digits (e.g., A87289317)'
+                message: 'Invalid RFID card number format. Expected: 1 letter + 8 digits (e.g., B00000008) or hex (e.g., 5AFB9FE1)'
             });
         }
 

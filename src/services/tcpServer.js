@@ -68,10 +68,9 @@ function getTimestamp() {
 // 全局日志缓冲区（供管理后台实时日志页使用）
 // ========================================
 const logBuffer = [];
-const MAX_LOG_BUFFER = 500;
+// 不设上限：每次 Zeabur 重新部署后从 0 开始累积，本次部署所有日志全部保留
 function pushLog(level, message) {
   logBuffer.push({ time: new Date().toISOString(), level, message });
-  if (logBuffer.length > MAX_LOG_BUFFER) logBuffer.shift();
 }
 
 function log(...args) {
