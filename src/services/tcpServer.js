@@ -1295,6 +1295,14 @@ async function handleVerReq(cmd, socket, deviceId) {
     // 获取或创建升级会话
     let session = upgradeSessions.get(deviceId);
     if (!session) {
+      const fs = require('fs');
+      log(`[TCP] Firmware filePath: ${task.firmware.filePath}`);
+      log(`[TCP] File exists: ${fs.existsSync(task.firmware.filePath)}`);
+      if (!fs.existsSync(task.firmware.filePath)) {
+        logError(`[TCP] FIRMWARE FILE NOT FOUND: ${task.firmware.filePath}`);
+        await task.update({ status: 'Failed', errorMessage: 'Firmware file not found on server. Please re-upload firmware via admin panel.' });
+        return null;
+      }
       const packets = await splitFileIntoPackets(task.firmware.filePath, 255);
 
       session = {

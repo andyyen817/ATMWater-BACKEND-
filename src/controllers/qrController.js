@@ -68,13 +68,13 @@ async function validateCard(req, res) {
 
     console.log(`[QR Card Validation] Validating RFID: ${rfidCard}`);
 
-    // 验证RFID格式（一位字母+八位数字）
-    if (!/^[A-Za-z][0-9]{8}$/.test(rfidCard)) {
+    // 验证RFID格式：支持 1字母+8数字(旧格式，如B00000008) 或 4-16位hex(新格式，如5AFB9FE1)
+    if (!/^([A-Za-z][0-9]{8}|[0-9A-Fa-f]{4,16})$/.test(rfidCard)) {
       console.warn(`[QR Card Validation] Invalid RFID format: ${rfidCard}`);
       return res.status(400).json({
         success: false,
         error: 'INVALID_CARD_FORMAT',
-        message: 'Invalid RFID card number format. Expected: 1 letter + 8 digits (e.g., A87289317)'
+        message: 'Invalid RFID card number format. Expected: 1 letter + 8 digits (e.g., B00000008) or 4-16 hex chars (e.g., 5AFB9FE1)'
       });
     }
 
