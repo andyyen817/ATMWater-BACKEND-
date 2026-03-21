@@ -1155,7 +1155,7 @@ exports.getPhysicalCards = async (req, res) => {
 exports.addPhysicalCard = async (req, res) => {
     try {
         const PhysicalCard = require('../models/PhysicalCard');
-        const { rfid } = req.body;
+        const { rfid, value } = req.body;
         if (!rfid) {
             return res.status(400).json({ success: false, message: 'RFID is required' });
         }
@@ -1166,7 +1166,14 @@ exports.addPhysicalCard = async (req, res) => {
         if (existing) {
             return res.status(409).json({ success: false, message: 'Card already exists' });
         }
-        const card = await PhysicalCard.create({ rfid, status: 'Active', issuedBy: req.user.id });
+        const initialValue = parseFloat(value || 0);
+        const card = await PhysicalCard.create({
+            rfid,
+            status: 'Active',
+            issuedBy: req.user.id,
+            initialValue,
+            balance: initialValue
+        });
         res.status(201).json({ success: true, data: card });
     } catch (error) {
         console.error('[Admin] addPhysicalCard error:', error);

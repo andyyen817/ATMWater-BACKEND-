@@ -60,6 +60,21 @@ const PhysicalCard = sequelize.define('PhysicalCard', {
     onDelete: 'SET NULL'
   },
 
+  // ========== 卡片余额 ==========
+  initialValue: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0,
+    allowNull: false,
+    comment: '卡片初始面值（水币）'
+  },
+
+  balance: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0,
+    allowNull: false,
+    comment: '卡片当前余额（水币）'
+  },
+
   // ========== 时间戳 ==========
   activatedAt: {
     type: DataTypes.DATE,

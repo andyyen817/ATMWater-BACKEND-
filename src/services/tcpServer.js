@@ -346,6 +346,9 @@ async function handleCommand(cmd, socket, deviceId) {
     case 'HB': // 心跳
       return await handleHeartbeat(cmd);
 
+    case 'MInfo': // 费用查询（设备刷卡前查询后端余额）
+      return await handleMInfo(cmd);
+
     case 'WR': // 用水数据记录上报（硬件协议核心指令）
       return await handleWaterRecord(cmd, deviceId);
 
@@ -567,7 +570,7 @@ async function handleSwipeWater(cmd) {
 
     // 先查找实体卡
     const physicalCard = await PhysicalCard.findOne({
-      where: { rfid: RFID, status: 'Active' },
+      where: { rfid: RFID, status: ['Active', 'Linked'] },
       include: [{ model: User, as: 'user' }]
     });
 
@@ -819,7 +822,7 @@ async function handleWaterRecord(cmd, deviceId) {
 
     // 先查找实体卡
     const physicalCard = await PhysicalCard.findOne({
-      where: { rfid: RFID, status: 'Active' },
+      where: { rfid: RFID, status: ['Active', 'Linked'] },
       include: [{ model: User, as: 'user' }]
     });
 
@@ -833,6 +836,48 @@ async function handleWaterRecord(cmd, deviceId) {
     }
 
     if (!user) {
+      // 未绑定 App 用户的物理卡：从卡自身余额扣款，仍记录用水数据
+      const standaloneCard = await PhysicalCard.findOne({
+        where: { rfid: RFID, status: ['Active', 'Linked'] }
+      });
+      if (standaloneCard) {
+        log(`[TCP] ✅ Standalone physical card: RFID=${RFID}, card balance=${standaloneCard.balance}`);
+        const pulseCount = parseInt(PWM) || 0;
+        const pulsePerLiter = parseFloat(unit.pulsePerLiter) || 1.0;
+        const volume = pulseCount / pulsePerLiter;
+        const amount = parseFloat(Money) || 0;
+        const cardBalanceBefore = parseFloat(standaloneCard.balance || 0);
+        const cardBalanceAfter = cardBalanceBefore - amount;
+        await standaloneCard.update({ balance: cardBalanceAfter });
+        await Transaction.create({
+          userId: standaloneCard.userId || null,
+          unitId: unit.id,
+          deviceId: deviceId,
+          type: 'WaterPurchase',
+          amount: amount,
+          balanceBefore: cardBalanceBefore,
+          balanceAfter: cardBalanceAfter,
+          volume: volume,
+          pricePerLiter: volume > 0 ? amount / volume : 0,
+          rfid: RFID,
+          cardType: 'Physical',
+          pulseCount: pulseCount,
+          inputTds: parseInt(IDS) || null,
+          outputTds: parseInt(Tds) || null,
+          waterTemp: parseFloat(Tmp) || null,
+          recordId: RE,
+          dispensingTime: parseInt(FT) || null,
+          status: 'Completed',
+          completedAt: TE ? new Date(parseInt(TE) * 1000) : new Date()
+        });
+        log(`[TCP] ✅ Standalone card WR recorded: RFID=${RFID}, amount=${amount}, cardBalance=${cardBalanceAfter}`);
+        return {
+          Cmd: 'WR', RFID, RE, RT: 'OK',
+          LeftL: '-1',
+          LeftM: cardBalanceAfter.toString(),
+          DayLmt: '-1'
+        };
+      }
       logError(`[TCP] ❌ User/Card not found: RFID=${RFID}`);
       logError(`[TCP] ❌ Checked physical cards and virtual RFID`);
       return {
@@ -983,6 +1028,62 @@ async function handleMakeWater(cmd) {
 }
 
 // ========================================
+// MInfo - 费用查询（设备刷卡前查询后端余额）
+// 协议：设备发 {Cmd:"MInfo",RFID,LeftM,UseL,TotalM,RE}
+// 服务器回 {Cmd:"WR",RFID,RE,RT:"OK",LeftM,TotalM,DayLmt:"-1"}
+// ========================================
+async function handleMInfo(cmd) {
+  const { RFID, RE } = cmd;
+  log(`[TCP] MInfo from RFID: ${RFID}`);
+  try {
+    let balance = null;
+
+    // 1. 查找实体卡（已绑定用户 → 用用户余额；未绑定 → 用卡自身余额）
+    const physicalCard = await PhysicalCard.findOne({
+      where: { rfid: RFID, status: ['Active', 'Linked'] },
+      include: [{ model: User, as: 'user' }]
+    });
+
+    if (physicalCard) {
+      if (physicalCard.user) {
+        // 已绑定 App 用户 → 返回用户账户余额
+        balance = parseFloat(physicalCard.user.balance || 0);
+        log(`[TCP] MInfo: RFID ${RFID} linked to user ${physicalCard.user.phone}, balance=${balance}`);
+      } else {
+        // 未绑定用户 → 返回卡自身余额
+        balance = parseFloat(physicalCard.balance || 0);
+        log(`[TCP] MInfo: RFID ${RFID} standalone card, card balance=${balance}`);
+      }
+    } else {
+      // 查虚拟卡
+      const user = await User.findOne({ where: { virtualRfid: RFID } });
+      if (user) {
+        balance = parseFloat(user.balance || 0);
+        log(`[TCP] MInfo: RFID ${RFID} virtual card, user balance=${balance}`);
+      }
+    }
+
+    if (balance === null) {
+      log(`[TCP] MInfo: RFID ${RFID} not found, returning LeftM=-2`);
+      return { Cmd: 'WR', RFID, RE, RT: 'OK', LeftM: '-2', TotalM: '0', DayLmt: '-1' };
+    }
+
+    return {
+      Cmd: 'WR',
+      RFID,
+      RE,
+      RT: 'OK',
+      LeftM: balance.toString(),
+      TotalM: balance.toString(),
+      DayLmt: '-1'
+    };
+  } catch (error) {
+    logError('[TCP] MInfo error:', error.message);
+    return { Cmd: 'WR', RFID, RE, RT: 'Fail', LeftM: '-1', TotalM: '0', DayLmt: '-1' };
+  }
+}
+
+// ========================================
 // AddMoney - 充值命令
 // ========================================
 async function handleAddMoney(cmd) {
@@ -992,7 +1093,7 @@ async function handleAddMoney(cmd) {
     // 查找用户
     let user = null;
     const physicalCard = await PhysicalCard.findOne({
-      where: { rfid: RFID, status: 'Active' },
+      where: { rfid: RFID, status: ['Active', 'Linked'] },
       include: [{ model: User, as: 'user' }]
     });
 

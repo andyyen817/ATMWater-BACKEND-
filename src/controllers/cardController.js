@@ -289,7 +289,8 @@ exports.linkCard = async (req, res) => {
             }
 
             const oldBalance = parseFloat(user.balance || 0);
-            const cardValue = parseFloat(card.value || 200000);
+            // 优先用卡自身余额（balance），其次用初始面值（initialValue），两者都没有则默认0
+            const cardValue = parseFloat(card.balance || card.initialValue || 0);
             const newBalance = oldBalance + cardValue;
 
             console.log(`[Card Link] Balance update: ${oldBalance} + ${cardValue} = ${newBalance}`);
