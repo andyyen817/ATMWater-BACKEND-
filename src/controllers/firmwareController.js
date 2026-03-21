@@ -121,10 +121,19 @@ exports.deleteFirmwareVersion = async (req, res) => {
     });
 
     if (activeTask) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot delete firmware with active upgrade tasks'
-      });
+      // 支持 force=true 强制取消所有关联任务后删除
+      if (req.query.force === 'true') {
+        await UpgradeTask.update(
+          { status: 'Cancelled' },
+          { where: { firmwareVersionId: id, status: { [Op.in]: ['Pending', 'InProgress'] } } }
+        );
+        console.log(`[Firmware] Force cancelled all active tasks for firmware ${id}`);
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot delete firmware with active upgrade tasks'
+        });
+      }
     }
 
     // 删除文件

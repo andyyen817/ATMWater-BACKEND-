@@ -68,5 +68,10 @@ router.post('/permissions', authorize('Super-Admin'), updatePermissions);
 // 5. 实时运行日志
 router.get('/logs/runtime', authorize('Super-Admin', 'Admin'), getRuntimeLogs);
 
+// 6. 物理水卡管理
+const { getPhysicalCards, addPhysicalCard } = require('../controllers/adminController');
+router.get('/physical-cards', authorize('Super-Admin', 'Admin'), getPhysicalCards);
+router.post('/physical-cards', authorize('Super-Admin', 'Admin'), addPhysicalCard);
+
 module.exports = router;
 

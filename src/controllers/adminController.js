@@ -1136,3 +1136,40 @@ exports.getRuntimeLogs = (req, res) => {
     if (since) logs = logs.filter(l => new Date(l.time) > since);
     res.json({ success: true, data: logs.slice(-limit) });
 };
+
+exports.getPhysicalCards = async (req, res) => {
+    try {
+        const PhysicalCard = require('../models/PhysicalCard');
+        const { User } = require('../models');
+        const cards = await PhysicalCard.findAll({
+            include: [{ model: User, as: 'user', attributes: ['id', 'phone', 'name'] }],
+            order: [['createdAt', 'DESC']]
+        });
+        res.json({ success: true, data: cards });
+    } catch (error) {
+        console.error('[Admin] getPhysicalCards error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.addPhysicalCard = async (req, res) => {
+    try {
+        const PhysicalCard = require('../models/PhysicalCard');
+        const { rfid } = req.body;
+        if (!rfid) {
+            return res.status(400).json({ success: false, message: 'RFID is required' });
+        }
+        if (!/^([A-Za-z][0-9]{8}|[0-9A-Fa-f]{4,16})$/.test(rfid)) {
+            return res.status(400).json({ success: false, message: 'Invalid RFID format' });
+        }
+        const existing = await PhysicalCard.findOne({ where: { rfid } });
+        if (existing) {
+            return res.status(409).json({ success: false, message: 'Card already exists' });
+        }
+        const card = await PhysicalCard.create({ rfid, status: 'Active', issuedBy: req.user.id });
+        res.status(201).json({ success: true, data: card });
+    } catch (error) {
+        console.error('[Admin] addPhysicalCard error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
