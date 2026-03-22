@@ -30,7 +30,7 @@ async function calculateAndSplitProfit(params) {
     const userTransactions = await Transaction.findAll({
       where: {
         userId,
-        type: 'TopUp',
+        type: 'topup',
         status: 'Completed',
         balanceAfter: { [Op.gt]: 0 } // 还有剩余
       },

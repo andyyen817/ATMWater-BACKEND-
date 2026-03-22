@@ -119,7 +119,7 @@ exports.dispenseByQR = async (req, res) => {
       userId: user.id,
       unitId: unit.id,
       deviceId: targetDeviceId,
-      type: 'WaterPurchase',
+      type: 'dispense',
       amount: totalCost,
       balanceBefore,
       balanceAfter,

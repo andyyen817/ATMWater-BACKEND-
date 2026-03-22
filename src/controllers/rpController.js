@@ -28,7 +28,7 @@ exports.getRPDashboard = async (req, res) => {
             const result = await Transaction.findAll({
                 where: {
                     unitId: { [Op.in]: unitIds },
-                    type: 'WaterPurchase',
+                    type: 'dispense',
                     status: 'Completed',
                     createdAt: { [Op.gte]: startOfMonth }
                 },
@@ -149,7 +149,7 @@ exports.getRPRevenueSummary = async (req, res) => {
             const result = await Transaction.findAll({
                 where: {
                     unitId: { [Op.in]: unitIds },
-                    type: 'WaterPurchase',
+                    type: 'dispense',
                     status: 'Completed',
                     createdAt: { [Op.between]: [startDate, endDate] }
                 },

@@ -25,6 +25,9 @@ const UpgradeTask = require('./UpgradeTask');
 // 审计日志模型
 const AuditLog = require('./AuditLog');
 
+// 静态内容模型
+const AppContent = require('./AppContent');
+
 // ========================================
 // 建立模型关联关系
 // ========================================
@@ -192,6 +195,8 @@ module.exports = {
   UpgradeTask,
   // 审计日志模型
   AuditLog,
+  // 静态内容模型
+  AppContent,
   syncDatabase
 };
 

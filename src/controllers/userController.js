@@ -6,6 +6,9 @@ const { logAction } = require('../utils/logger');
 // ❌ renrenWaterService 已删除（阶段0：清理人人水站功能）
 // const renrenWaterService = require('../services/renrenWaterService');
 const { Op } = require('sequelize');
+const bcrypt = require('bcryptjs');
+const path = require('path');
+const fs = require('fs');
 
 /**
  * @desc    获取用户的卡片列表（含余额）
@@ -52,40 +55,22 @@ exports.getCardTransactions = async (req, res) => {
     try {
         const { cardNo } = req.params;
         const { page = 1, size = 20 } = req.query;
+        const offset = (parseInt(page) - 1) * parseInt(size);
 
-        // 验证卡片是否属于当前用户
-        const card = await RenrenCard.findOne({ where: { cardNo, localUserId: req.user.id } });
+        // 查询 Transaction 表中 rfid 匹配且属于当前用户的记录
+        const { rows, count } = await Transaction.findAndCountAll({
+            where: { rfid: cardNo, userId: req.user.id },
+            order: [['createdAt', 'DESC']],
+            limit: parseInt(size),
+            offset
+        });
 
-        if (!card) {
-            return res.status(404).json({ success: false, message: 'Card not found' });
-        }
-
-        // 从人人水站获取交易记录
-        const records = await renrenWaterService.getCardRecords(cardNo, parseInt(page), parseInt(size));
-
-        if (records.success && records.code === 0) {
-            const transactions = records.result.list || [];
-
-            res.status(200).json({
-                success: true,
-                data: transactions.map(t => ({
-                    date: t.createTime ? new Date(t.createTime) : new Date(),
-                    cash: t.cash || 0,
-                    presentCash: t.present_cash || 0,
-                    days: t.days || 0,
-                    tradePayType: t.tradePayType,
-                    remark: t.remark || ''
-                })),
-                total: records.result.total || 0,
-                page: parseInt(page)
-            });
-        } else {
-            res.status(500).json({
-                success: false,
-                message: 'Failed to fetch transactions from Renren Water API',
-                data: []
-            });
-        }
+        res.status(200).json({
+            success: true,
+            data: rows,
+            total: count,
+            page: parseInt(page)
+        });
     } catch (error) {
         console.error('[CardTransactions] Error:', error.message);
         res.status(500).json({ success: false, message: 'Server Error', data: [] });
@@ -101,7 +86,7 @@ exports.getUserHistory = async (req, res) => {
         const history = await Transaction.findAll({
             where: {
                 userId: req.user.id,
-                type: { [Op.in]: ['Water-Purchase', 'Dispense'] }
+                type: { [Op.in]: ['dispense'] }
             },
             order: [['createdAt', 'DESC']]
         });
@@ -128,9 +113,13 @@ exports.getUserHistory = async (req, res) => {
 exports.getProfile = async (req, res) => {
     try {
         const user = await User.findByPk(req.user.id, {
-            attributes: { exclude: ['otp', 'otpExpires'] }
+            attributes: { exclude: ['otp', 'otpExpires', 'password', 'pin'] }
         });
-        res.status(200).json({ success: true, data: user });
+        if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+        // 返回前端期望的字段名（phone 而非 phoneNumber，nickname 优先于 name）
+        const data = user.toJSON();
+        data.phone = data.phoneNumber || null;
+        res.status(200).json({ success: true, data });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server Error' });
     }
@@ -142,23 +131,25 @@ exports.getProfile = async (req, res) => {
  */
 exports.updateProfile = async (req, res) => {
     try {
-        const { name, email } = req.body;
+        const { name, nickname, email } = req.body;
         const user = await User.findByPk(req.user.id);
 
         if (!user) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
 
-        await user.update({ name, email });
+        await user.update({ name, nickname, email });
 
         // Reload to exclude sensitive fields
         const updatedUser = await User.findByPk(req.user.id, {
-            attributes: { exclude: ['otp', 'otpExpires'] }
+            attributes: { exclude: ['otp', 'otpExpires', 'password', 'pin'] }
         });
+        const data = updatedUser.toJSON();
+        data.phone = data.phoneNumber || null;
 
         res.status(200).json({
             success: true,
-            data: updatedUser
+            data
         });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server Error' });
@@ -287,5 +278,56 @@ exports.uploadUserLog = async (req, res) => {
             message: 'Failed to upload log',
             error: error.message
         });
+    }
+};
+
+/**
+ * @desc    上传用户头像
+ * @route   POST /api/users/upload-avatar
+ */
+exports.uploadAvatar = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'No file uploaded' });
+        }
+        const user = await User.findByPk(req.user.id);
+        if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+        const baseUrl = process.env.BASE_URL || 'https://atmwater-backend.zeabur.app';
+        const avatarUrl = `${baseUrl}/uploads/avatars/${req.file.filename}`;
+        await user.update({ avatar: avatarUrl });
+
+        res.status(200).json({ success: true, data: { avatarUrl } });
+    } catch (error) {
+        console.error('[uploadAvatar] Error:', error.message);
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
+
+/**
+ * @desc    修改密码
+ * @route   PUT /api/users/change-password
+ */
+exports.changePassword = async (req, res) => {
+    try {
+        const { oldPassword, newPassword } = req.body;
+        if (!oldPassword || !newPassword) {
+            return res.status(400).json({ success: false, message: 'oldPassword and newPassword are required' });
+        }
+        const user = await User.findByPk(req.user.id);
+        if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+        if (!user.password) {
+            return res.status(400).json({ success: false, message: 'No password set for this account. Please set a password first.' });
+        }
+        const isValid = await bcrypt.compare(oldPassword, user.password);
+        if (!isValid) {
+            return res.status(400).json({ success: false, message: 'Old password is incorrect' });
+        }
+        const hashed = await bcrypt.hash(newPassword, 10);
+        await user.update({ password: hashed });
+        res.status(200).json({ success: true, message: 'Password updated successfully' });
+    } catch (error) {
+        console.error('[changePassword] Error:', error.message);
+        res.status(500).json({ success: false, message: 'Server Error' });
     }
 };

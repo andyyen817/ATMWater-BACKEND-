@@ -64,7 +64,7 @@ exports.getDashboard = async (req, res) => {
     const todayTransactions = await Transaction.findAll({
       where: {
         unitId: { [Op.in]: unitIds },
-        type: 'WaterPurchase',
+        type: 'dispense',
         status: 'Completed',
         createdAt: {
           [Op.gte]: new Date(today + 'T00:00:00'),
@@ -92,7 +92,7 @@ exports.getDashboard = async (req, res) => {
     const monthlyTransactions = await Transaction.findAll({
       where: {
         unitId: { [Op.in]: unitIds },
-        type: 'WaterPurchase',
+        type: 'dispense',
         status: 'Completed',
         createdAt: {
           [Op.between]: [monthStart, monthEnd]

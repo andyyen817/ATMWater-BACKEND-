@@ -10,9 +10,12 @@ const {
     getUserHistory,
     getUserCards,
     getCardTransactions,
-    uploadUserLog
+    uploadUserLog,
+    uploadAvatar,
+    changePassword
 } = require('../controllers/userController');
 const { protect } = require('../middleware/authMiddleware');
+const avatarUpload = require('../middleware/avatarUploadMiddleware');
 
 router.use(protect);
 
@@ -26,5 +29,7 @@ router.delete('/bank-accounts/:id', deleteBankAccount);
 router.post('/addresses', addAddress);
 router.delete('/addresses/:id', deleteAddress);
 router.post('/logs/upload', uploadUserLog);
+router.post('/upload-avatar', avatarUpload.single('avatar'), uploadAvatar);
+router.put('/change-password', changePassword);
 
 module.exports = router;

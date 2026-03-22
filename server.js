@@ -729,6 +729,9 @@ app.use('/api/qr', require('./src/routes/qrRoutes'));
 // 固件升级路由
 app.use('/api/firmware', require('./src/routes/firmwareRoutes'));
 
+// 静态内容管理路由（条款/隐私/关于/帮助）
+app.use('/api/content', require('./src/routes/contentRoutes'));
+
 // ========================================
 // 404 Handler - 返回JSON而不是HTML
 // ========================================

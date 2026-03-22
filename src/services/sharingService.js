@@ -22,7 +22,7 @@ const processProfitSharing = async (outTradeNo, totalAmount, unitId, customerId)
             // For physical card orders without prior transaction, create one
             const newTransaction = await Transaction.create({
                 userId: customerId,
-                type: 'WaterPurchase',
+                type: 'dispense',
                 amount: totalAmount,
                 externalId: outTradeNo,
                 status: 'Completed',

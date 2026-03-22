@@ -38,7 +38,7 @@ exports.createTopUp = async (req, res) => {
         // 4. 创建已完成的交易记录 - 标记为App充值水币
         await Transaction.create({
             userId,
-            type: 'TopUp',
+            type: 'topup',
             amount,
             balanceType: 'APP_BACKED', // 标记为App充值
             profitShared: false, // 待出水时分账
@@ -107,27 +107,42 @@ exports.getBalance = async (req, res) => {
  */
 exports.getTransactions = async (req, res) => {
     try {
-        const user = await User.findByPk(req.user.id);
-        if (!user) {
-            return res.status(404).json({ success: false, message: 'User not found' });
-        }
+        const { type, page = 1, limit = 20 } = req.query;
+        const where = { userId: req.user.id };
+        if (type) where.type = type;
+        const offset = (parseInt(page) - 1) * parseInt(limit);
 
-        console.log('[Wallet Transactions] Querying for userId:', req.user.id);
+        console.log('[Wallet Transactions] Querying for userId:', req.user.id, '| type:', type || 'all', '| page:', page);
 
-        // ❌ RenrenTransaction 已删除（阶段0：清理人人水站功能）
-        // 只返回用户的本地交易记录（TopUp、ReferralReward等）
-        const localTransactions = await Transaction.findAll({
-            where: { userId: req.user.id },
+        const { rows, count } = await Transaction.findAndCountAll({
+            where,
             order: [['createdAt', 'DESC']],
-            limit: 50
+            limit: parseInt(limit),
+            offset
         });
 
-        console.log('[Wallet Transactions] Found', localTransactions.length, 'local transaction records');
+        // 字段标准化映射，统一前后端字段名
+        const statusMap = { Completed: 'success', Pending: 'pending', Failed: 'failed', Cancelled: 'failed' };
+        const formatted = rows.map(tx => ({
+            id: tx.id,
+            type: tx.type,
+            amount: parseFloat(tx.amount),
+            balance: tx.balanceAfter != null ? parseFloat(tx.balanceAfter) : null,
+            volume: tx.volume != null ? parseFloat(tx.volume) : null,
+            balanceType: tx.balanceType,
+            status: statusMap[tx.status] || tx.status.toLowerCase(),
+            description: tx.description,
+            createdAt: tx.createdAt
+        }));
 
-        // 返回本地交易记录
+        console.log('[Wallet Transactions] Found', count, 'records, returning page', page);
+
         res.status(200).json({
             success: true,
-            data: localTransactions
+            data: formatted,
+            total: count,
+            page: parseInt(page),
+            limit: parseInt(limit)
         });
     } catch (error) {
         console.error('[Wallet Transactions] Error:', error);

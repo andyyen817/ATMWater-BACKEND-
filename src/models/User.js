@@ -39,6 +39,18 @@ const User = sequelize.define('User', {
     comment: '用户姓名'
   },
 
+  nickname: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    comment: '用户昵称（显示名）'
+  },
+
+  avatar: {
+    type: DataTypes.STRING(500),
+    allowNull: true,
+    comment: '头像URL'
+  },
+
   email: {
     type: DataTypes.STRING(100),
     allowNull: true,
