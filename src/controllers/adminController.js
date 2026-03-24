@@ -1043,10 +1043,13 @@ exports.importRenrenDevice = async (req, res) => {
             });
         }
 
-        console.log('[ImportRenrenDevice] 收到导入请求', { deviceNo });
+        // 20位纯数字 → 加 '0001' 后缀，与 createUnit 保持一致（硬件通信需要24位格式）
+        const fullDeviceId = /^\d{20}$/.test(deviceNo) ? deviceNo + '0001' : deviceNo;
+
+        console.log('[ImportRenrenDevice] 收到导入请求', { deviceNo, fullDeviceId });
 
         // 先检查设备是否已在本地数据库中
-        const existingUnit = await Unit.findOne({ unitId: deviceNo });
+        const existingUnit = await Unit.findOne({ where: { deviceId: fullDeviceId } });
         if (existingUnit) {
             return res.status(200).json({
                 success: true,
@@ -1062,46 +1065,32 @@ exports.importRenrenDevice = async (req, res) => {
         if (deviceInfo.success && deviceInfo.code === 0) {
             const result = deviceInfo.result;
 
-            // 创建新设备记录
-            const unit = new Unit({
-                unitId: result.device_no || deviceNo,
-                locationName: result.device_name || `设备 ${deviceNo}`,
-                status: 'Active',
-                // 人人水站API数据
-                price: result.price || 0,
-                speed: result.speed || 0,
-                preCash: result.pre_cash || 0,
-                valid: result.valid === 1,
-                validDate: result.valid_date || null,
-                // 出水口信息
-                outlets: result.outlets ? result.outlets.map(o => ({
-                    no: o.outlet_no,
-                    price: o.price,
-                    speed: o.speed
-                })) : []
+            // 创建新设备记录（使用 Sequelize Unit.create）
+            const unit = await Unit.create({
+                deviceId: fullDeviceId,
+                deviceName: result.device_name || `设备 ${deviceNo}`,
+                status: 'Offline',
+                password: 'renren_import',
+                location: result.device_name || '',
+                isActive: true
             });
 
-            await unit.save();
-
             console.log('[ImportRenrenDevice] 导入成功', {
-                unitId: unit.unitId,
-                locationName: unit.locationName
+                deviceId: unit.deviceId,
+                deviceName: unit.deviceName
             });
 
             // 立即通过WebSocket推送新设备信息到所有前端
-            websocketService.sendDeviceUpdate(unit.unitId, {
-                unitId: unit.unitId,
-                locationName: unit.locationName,
+            websocketService.sendDeviceUpdate(unit.deviceId, {
+                deviceId: unit.deviceId,
+                deviceName: unit.deviceName,
                 status: unit.status,
-                price: unit.price,
-                speed: unit.speed,
-                outlets: unit.outlets,
                 lastHeartbeat: unit.lastHeartbeat,
                 newlyImported: true  // 标记为新导入的设备
             });
 
             // 发送系统通知
-            websocketService.sendNotification('success', `设备 ${unit.unitId} 导入成功，已启用实时同步`);
+            websocketService.sendNotification('success', `设备 ${unit.deviceId} 导入成功，已启用实时同步`);
 
             res.status(200).json({
                 success: true,
