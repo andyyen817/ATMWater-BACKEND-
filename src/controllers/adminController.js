@@ -4,8 +4,8 @@ const UserLog = require('../models/UserLog');
 const Permission = require('../models/Permission');
 const { Op } = require('sequelize');
 const hardwareService = require('../services/hardwareService');
-const renrenWaterService = require('../services/renrenWaterService');
 const websocketService = require('../services/websocketService');
+const { isDeviceConnected } = require('../services/tcpServer');
 // const completeDataSyncService = require('../services/completeDataSyncService'); // 暂时注释，因为依赖mongoose
 const { MaintenanceLog, WaterQualityLog } = require('../models'); // 使用MySQL版本的模型
 
@@ -1059,53 +1059,44 @@ exports.importRenrenDevice = async (req, res) => {
             });
         }
 
-        // 调用人人水站API检查设备是否存在
-        const deviceInfo = await renrenWaterService.getDeviceInfo(deviceNo);
+        // 检查设备是否通过TCP连接到服务器
+        const connected = isDeviceConnected(fullDeviceId);
+        console.log('[ImportRenrenDevice] TCP连接状态', { fullDeviceId, connected });
 
-        if (deviceInfo.success && deviceInfo.code === 0) {
-            const result = deviceInfo.result;
+        // 直接创建设备记录（无需人人水站API验证）
+        const unit = await Unit.create({
+            deviceId: fullDeviceId,
+            deviceName: `设备 ${deviceNo}`,
+            status: connected ? 'Online' : 'Offline',
+            password: 'direct_import',
+            location: '',
+            isActive: true
+        });
 
-            // 创建新设备记录（使用 Sequelize Unit.create）
-            const unit = await Unit.create({
-                deviceId: fullDeviceId,
-                deviceName: result.device_name || `设备 ${deviceNo}`,
-                status: 'Offline',
-                password: 'renren_import',
-                location: result.device_name || '',
-                isActive: true
-            });
+        console.log('[ImportRenrenDevice] 导入成功', {
+            deviceId: unit.deviceId,
+            deviceName: unit.deviceName,
+            connected
+        });
 
-            console.log('[ImportRenrenDevice] 导入成功', {
-                deviceId: unit.deviceId,
-                deviceName: unit.deviceName
-            });
+        // 立即通过WebSocket推送新设备信息到所有前端
+        websocketService.sendDeviceUpdate(unit.deviceId, {
+            deviceId: unit.deviceId,
+            deviceName: unit.deviceName,
+            status: unit.status,
+            lastHeartbeat: unit.lastHeartbeat,
+            newlyImported: true
+        });
 
-            // 立即通过WebSocket推送新设备信息到所有前端
-            websocketService.sendDeviceUpdate(unit.deviceId, {
-                deviceId: unit.deviceId,
-                deviceName: unit.deviceName,
-                status: unit.status,
-                lastHeartbeat: unit.lastHeartbeat,
-                newlyImported: true  // 标记为新导入的设备
-            });
+        // 发送系统通知
+        websocketService.sendNotification('success', `设备 ${unit.deviceId} 导入成功，已启用实时同步`);
 
-            // 发送系统通知
-            websocketService.sendNotification('success', `设备 ${unit.deviceId} 导入成功，已启用实时同步`);
-
-            res.status(200).json({
-                success: true,
-                message: '设备导入成功，已启用实时同步',
-                alreadyExists: false,
-                data: unit
-            });
-        } else {
-            console.log('[ImportRenrenDevice] 设备不存在于人人水站', { deviceNo });
-            res.status(404).json({
-                success: false,
-                message: '设备不存在于人人水站系统',
-                error: deviceInfo.error || 'Device not found in RenrenWater system'
-            });
-        }
+        res.status(200).json({
+            success: true,
+            message: '设备导入成功，已启用实时同步',
+            alreadyExists: false,
+            data: unit
+        });
     } catch (error) {
         console.error('[ImportRenrenDevice] 导入异常', {
             deviceNo: req.body.deviceNo,
