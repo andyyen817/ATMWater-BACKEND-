@@ -1137,7 +1137,7 @@ exports.getPhysicalCards = async (req, res) => {
 exports.addPhysicalCard = async (req, res) => {
     try {
         const PhysicalCard = require('../models/PhysicalCard');
-        const { rfid, value } = req.body;
+        const { rfid, value, cardNumber } = req.body;
         if (!rfid) {
             return res.status(400).json({ success: false, message: 'RFID is required' });
         }
@@ -1151,6 +1151,7 @@ exports.addPhysicalCard = async (req, res) => {
         const initialValue = parseFloat(value || 0);
         const card = await PhysicalCard.create({
             rfid,
+            cardNumber: cardNumber || null,
             status: 'Active',
             issuedBy: req.user.id,
             initialValue,
@@ -1159,6 +1160,42 @@ exports.addPhysicalCard = async (req, res) => {
         res.status(201).json({ success: true, data: card });
     } catch (error) {
         console.error('[Admin] addPhysicalCard error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.batchAddPhysicalCards = async (req, res) => {
+    try {
+        const PhysicalCard = require('../models/PhysicalCard');
+        const { cards } = req.body;
+        if (!Array.isArray(cards) || cards.length === 0) {
+            return res.status(400).json({ success: false, message: 'cards array is required' });
+        }
+        let inserted = 0, failed = 0, failedList = [];
+        for (const item of cards) {
+            try {
+                const rfid = (item.rfid || '').trim().toUpperCase();
+                const cardNumber = (item.cardNumber || '').trim() || null;
+                if (!rfid) { failed++; failedList.push(`${item.cardNumber || '?'}: RFID为空`); continue; }
+                const existing = await PhysicalCard.findOne({ where: { rfid } });
+                if (existing) { failed++; failedList.push(`${rfid}: 已存在`); continue; }
+                await PhysicalCard.create({
+                    rfid,
+                    cardNumber,
+                    status: 'Active',
+                    issuedBy: req.user.id,
+                    initialValue: 0,
+                    balance: 0
+                });
+                inserted++;
+            } catch (e) {
+                failed++;
+                failedList.push(`${item.rfid || item.cardNumber}: ${e.message}`);
+            }
+        }
+        res.json({ success: true, inserted, failed, failedList });
+    } catch (error) {
+        console.error('[Admin] batchAddPhysicalCards error:', error);
         res.status(500).json({ success: false, message: error.message });
     }
 };

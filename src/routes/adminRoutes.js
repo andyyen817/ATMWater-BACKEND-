@@ -69,9 +69,10 @@ router.post('/permissions', authorize('Super-Admin'), updatePermissions);
 router.get('/logs/runtime', authorize('Super-Admin', 'Admin'), getRuntimeLogs);
 
 // 6. 物理水卡管理
-const { getPhysicalCards, addPhysicalCard } = require('../controllers/adminController');
+const { getPhysicalCards, addPhysicalCard, batchAddPhysicalCards } = require('../controllers/adminController');
 router.get('/physical-cards', authorize('Super-Admin', 'Admin'), getPhysicalCards);
 router.post('/physical-cards', authorize('Super-Admin', 'Admin'), addPhysicalCard);
+router.post('/physical-cards/batch', authorize('Super-Admin', 'Admin'), batchAddPhysicalCards);
 
 module.exports = router;
 

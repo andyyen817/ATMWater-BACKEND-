@@ -18,6 +18,14 @@ const PhysicalCard = sequelize.define('PhysicalCard', {
     unique: true,
     comment: 'RFID卡号（唯一标识）'
   },
+
+  // ========== 物理卡号 ==========
+  cardNumber: {
+    type: DataTypes.STRING(20),
+    allowNull: true,
+    unique: true,
+    comment: '物理卡号（1位字母+8位数字，如A00000001）'
+  },
   
   // ========== 用户绑定 ==========
   userId: {
