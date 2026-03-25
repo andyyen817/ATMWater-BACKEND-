@@ -788,10 +788,13 @@ async function handleWaterRecord(cmd, deviceId) {
       const user = await User.findByPk(qrTransaction.userId);
       log(`[TCP] ✅ QR order completed: txId=${qrTransaction.id}, user balance=${user ? user.balance : 'N/A'}`);
 
+      const totalRecharge = await getTotalRecharge(qrTransaction.userId, null);
+
       return {
         Cmd: 'WR', RFID, RE, RT: 'OK',
         LeftL: '-1',
         LeftM: user ? user.balance.toString() : '-1',
+        TotalM: totalRecharge.toString(),
         DayLmt: '-1'
       };
     } catch (err) {
@@ -871,10 +874,12 @@ async function handleWaterRecord(cmd, deviceId) {
           completedAt: TE ? new Date(parseInt(TE) * 1000) : new Date()
         });
         log(`[TCP] ✅ Standalone card WR recorded: RFID=${RFID}, amount=${amount}, cardBalance=${cardBalanceAfter}`);
+        const standaloneTotalRecharge = await getTotalRecharge(null, RFID);
         return {
           Cmd: 'WR', RFID, RE, RT: 'OK',
           LeftL: '-1',
           LeftM: cardBalanceAfter.toString(),
+          TotalM: standaloneTotalRecharge.toString(),
           DayLmt: '-1'
         };
       }
@@ -958,6 +963,7 @@ async function handleWaterRecord(cmd, deviceId) {
     });
 
     // 7. 返回响应（硬件协议格式）
+    const userTotalRecharge = await getTotalRecharge(user.id, null);
     return {
       Cmd: 'WR',
       RFID: RFID,
@@ -965,6 +971,7 @@ async function handleWaterRecord(cmd, deviceId) {
       RT: 'OK',
       LeftL: '-1',  // 剩余升数（-1表示不限制）
       LeftM: balanceAfter.toString(),  // 剩余金额
+      TotalM: userTotalRecharge.toString(),  // 用户历史总充值金额
       DayLmt: '-1'  // 每日限额（-1表示不限制）
     };
 
@@ -1028,6 +1035,31 @@ async function handleMakeWater(cmd) {
 }
 
 // ========================================
+// Helper: 计算用户历史总充值金额（TotalM）
+// userId 有值时按用户查，否则按 RFID（独立实体卡）查
+// ========================================
+async function getTotalRecharge(userId, rfid) {
+  try {
+    if (userId) {
+      const result = await Transaction.sum('amount', {
+        where: { userId, type: 'topup', status: 'Completed' }
+      });
+      return parseFloat(result) || 0;
+    }
+    if (rfid) {
+      const result = await Transaction.sum('amount', {
+        where: { rfid, type: 'topup', status: 'Completed' }
+      });
+      return parseFloat(result) || 0;
+    }
+    return 0;
+  } catch (e) {
+    logError('[TCP] getTotalRecharge error:', e.message);
+    return 0;
+  }
+}
+
+// ========================================
 // MInfo - 费用查询（设备刷卡前查询后端余额）
 // 协议：设备发 {Cmd:"MInfo",RFID,LeftM,UseL,TotalM,RE}
 // 服务器回 {Cmd:"WR",RFID,RE,RT:"OK",LeftM,TotalM,DayLmt:"-1"}
@@ -1044,14 +1076,19 @@ async function handleMInfo(cmd) {
       include: [{ model: User, as: 'user' }]
     });
 
+    let totalRechargeUserId = null;
+    let totalRechargeRfid = null;
+
     if (physicalCard) {
       if (physicalCard.user) {
         // 已绑定 App 用户 → 返回用户账户余额
         balance = parseFloat(physicalCard.user.balance || 0);
+        totalRechargeUserId = physicalCard.user.id;
         log(`[TCP] MInfo: RFID ${RFID} linked to user ${physicalCard.user.phone}, balance=${balance}`);
       } else {
         // 未绑定用户 → 返回卡自身余额
         balance = parseFloat(physicalCard.balance || 0);
+        totalRechargeRfid = RFID;
         log(`[TCP] MInfo: RFID ${RFID} standalone card, card balance=${balance}`);
       }
     } else {
@@ -1059,6 +1096,7 @@ async function handleMInfo(cmd) {
       const user = await User.findOne({ where: { virtualRfid: RFID } });
       if (user) {
         balance = parseFloat(user.balance || 0);
+        totalRechargeUserId = user.id;
         log(`[TCP] MInfo: RFID ${RFID} virtual card, user balance=${balance}`);
       }
     }
@@ -1068,13 +1106,15 @@ async function handleMInfo(cmd) {
       return { Cmd: 'WR', RFID, RE, RT: 'OK', LeftM: '-2', TotalM: '0', DayLmt: '-1' };
     }
 
+    const totalRecharge = await getTotalRecharge(totalRechargeUserId, totalRechargeRfid);
+
     return {
       Cmd: 'WR',
       RFID,
       RE,
       RT: 'OK',
       LeftM: balance.toString(),
-      TotalM: balance.toString(),
+      TotalM: totalRecharge.toString(),
       DayLmt: '-1'
     };
   } catch (error) {
