@@ -239,10 +239,11 @@ exports.linkCard = async (req, res) => {
         const transaction = await sequelize.transaction();
 
         try {
-            // 1. 查找卡片（使用RFID字段）
-            const card = await PhysicalCard.findOne({
-                where: { rfid: rfidCard }
-            });
+            // 1. 查找卡片：先按 cardNumber 查（QR码可能编码的是cardNumber），找不到再按 rfid 查
+            let card = await PhysicalCard.findOne({ where: { cardNumber: rfidCard } });
+            if (!card) {
+                card = await PhysicalCard.findOne({ where: { rfid: rfidCard } });
+            }
 
             if (!card) {
                 await transaction.rollback();
