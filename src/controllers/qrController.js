@@ -78,10 +78,11 @@ async function validateCard(req, res) {
       });
     }
 
-    // 从PhysicalCards表查询卡片信息
-    const card = await PhysicalCard.findOne({
-      where: { rfid: rfidCard }
-    });
+    // 从PhysicalCards表查询卡片信息：先按 cardNumber 查（新QR格式），找不到再按 rfid 查（旧QR格式兼容）
+    let card = await PhysicalCard.findOne({ where: { cardNumber: rfidCard } });
+    if (!card) {
+      card = await PhysicalCard.findOne({ where: { rfid: rfidCard } });
+    }
 
     if (!card) {
       console.warn(`[QR Card Validation] Card not found: ${rfidCard}`);
@@ -110,7 +111,8 @@ async function validateCard(req, res) {
       success: true,
       data: {
         rfidCard: card.rfid,
-        value: card.value || 200000,
+        cardNumber: card.cardNumber,
+        value: card.balance || 200000,
         status: card.status,
         canLink: canLink,
         message: 'Card is available for linking'

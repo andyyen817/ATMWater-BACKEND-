@@ -26,6 +26,7 @@ exports.getUserCards = async (req, res) => {
         const formattedCards = cards.map(card => ({
             id: card.id,
             rfid: card.rfid,
+            cardNumber: card.cardNumber,
             status: card.status,
             activatedAt: card.activatedAt,
             boundAt: card.boundAt,
