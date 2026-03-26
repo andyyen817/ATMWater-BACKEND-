@@ -99,7 +99,9 @@ app.get('/', (req, res) => {
 });  
 
 // 7. 静态资源托管
-app.use('/app', express.static(path.join(__dirname, '../../ATMWater-APP/UI_Design/prototypes')));  
-app.use('/web', express.static(path.join(__dirname, '../../ATMWater-WEB/UI_Design/prototypes')));  
+app.use('/app', express.static(path.join(__dirname, '../../ATMWater-APP/UI_Design/prototypes')));
+app.use('/web', express.static(path.join(__dirname, '../../ATMWater-WEB/UI_Design/prototypes')));
+// 8. 持久化磁盘文件（头像、固件等）- Zeabur 挂载目录 /app/uploads
+app.use('/uploads', express.static('/app/uploads'));
 
 module.exports = app;  

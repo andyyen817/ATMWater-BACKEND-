@@ -2,8 +2,12 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// 确保头像上传目录存在
-const uploadDir = path.join(__dirname, '../../uploads/avatars');
+// Zeabur 持久化磁盘挂载在 /app/uploads，头像存入子目录 avatars
+// 本地开发时回退到相对路径
+const uploadDir = process.env.NODE_ENV === 'production'
+  ? '/app/uploads/avatars'
+  : path.join(__dirname, '../../uploads/avatars');
+
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
