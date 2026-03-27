@@ -25,6 +25,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// 持久化磁盘文件（头像、固件等）- Zeabur 挂载目录 /app/uploads
+const uploadPath = process.env.NODE_ENV === 'production'
+  ? '/app/uploads'
+  : require('path').join(__dirname, 'uploads');
+app.use('/uploads', express.static(uploadPath));
+
 // ========================================
 // Health Check Route
 // ========================================
