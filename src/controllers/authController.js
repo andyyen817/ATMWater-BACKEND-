@@ -135,8 +135,8 @@ exports.requestOTP = async (req, res) => {
             if (referrerCode) {
                 const referrer = await User.findOne({ where: { referralCode: referrerCode.toUpperCase() } });
                 if (referrer) {
-                    user.managedBy = referrer.id;
-                    console.log(`[Referral] New user ${phoneNumber} referred by ${referrer.phoneNumber}`);
+                    user.referredBy = referrerCode.toUpperCase();
+                    console.log(`[Referral] New user ${phoneNumber} referred by code ${referrerCode.toUpperCase()}`);
                     await user.save();
                 }
             }

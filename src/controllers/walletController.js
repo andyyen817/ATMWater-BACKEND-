@@ -1,5 +1,6 @@
 const { User, Transaction } = require('../models'); // Stage 1 修复：使用 Sequelize 模型
 // ❌ RenrenTransaction 已删除（阶段0：清理人人水站功能）
+const { checkAndGrantInviteBonus, grantCashbackToReferrer } = require('./referralController');
 
 /**
  * @desc    发起电子卡充值申请 (本地余额更新)
@@ -34,6 +35,10 @@ exports.createTopUp = async (req, res) => {
         const newBalance = currentBalance + amount;
         user.balance = newBalance;
         await user.save();
+
+        // 3.5 裂变奖励（不阻断主流程）
+        await checkAndGrantInviteBonus(userId);
+        await grantCashbackToReferrer(userId, amount);
 
         // 4. 创建已完成的交易记录 - 标记为App充值水币
         await Transaction.create({

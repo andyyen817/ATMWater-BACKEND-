@@ -45,7 +45,7 @@ const Transaction = sequelize.define('Transaction', {
   
   // ========== 交易类型 ==========
   type: {
-    type: DataTypes.ENUM('topup', 'dispense', 'withdrawal', 'refund'),
+    type: DataTypes.ENUM('topup', 'dispense', 'withdrawal', 'refund', 'referral_reward'),
     allowNull: false,
     comment: '交易类型'
   },
