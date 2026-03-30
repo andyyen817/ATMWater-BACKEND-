@@ -738,6 +738,9 @@ app.use('/api/firmware', require('./src/routes/firmwareRoutes'));
 // 静态内容管理路由（条款/隐私/关于/帮助）
 app.use('/api/content', require('./src/routes/contentRoutes'));
 
+// 邀请好友 / 推荐返现路由
+app.use('/api/referral', require('./src/routes/referralRoutes'));
+
 // ========================================
 // 404 Handler - 返回JSON而不是HTML
 // ========================================
