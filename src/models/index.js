@@ -28,6 +28,9 @@ const AuditLog = require('./AuditLog');
 // 静态内容模型
 const AppContent = require('./AppContent');
 
+// 设备参数配置模型
+const DeviceSettings = require('./DeviceSettings');
+
 // ========================================
 // 建立模型关联关系
 // ========================================
@@ -197,6 +200,8 @@ module.exports = {
   AuditLog,
   // 静态内容模型
   AppContent,
+  // 设备参数配置模型
+  DeviceSettings,
   syncDatabase
 };
 

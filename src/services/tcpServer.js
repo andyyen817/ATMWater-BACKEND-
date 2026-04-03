@@ -2,7 +2,7 @@
 // TCP 服务器 - 处理硬件设备连接
 
 const net = require('net');
-const { User, PhysicalCard, Unit, Transaction, FirmwareVersion, UpgradeTask } = require('../models');
+const { User, PhysicalCard, Unit, Transaction, FirmwareVersion, UpgradeTask, DeviceSettings } = require('../models');
 const websocketService = require('./websocketService');
 const { calculateCRC8, splitFileIntoPackets } = require('../utils/crcUtils');
 
@@ -375,6 +375,12 @@ async function handleCommand(cmd, socket, deviceId) {
 
     case 'VerReq': // 请求固件数据包
       return await handleVerReq(cmd, socket, deviceId);
+
+    case 'Settings': // 参数设置命令
+      return await handleSettings(cmd);
+
+    case 'QuerySets': // 参数查询命令
+      return await handleQuerySets(cmd);
 
     default:
       // 对不认识的命令返回 {ok}
@@ -1621,6 +1627,96 @@ async function sendUpgradeCommand(deviceId, firmwareInfo) {
   log(`[TCP] Sending upgrade command to ${deviceId}:`, command);
 
   return sendCommandToDevice(deviceId, command);
+}
+
+// ========================================
+// Settings - 参数设置命令
+// ========================================
+async function handleSettings(cmd) {
+  const { DId, RC, ...params } = cmd;
+  const deviceId = buildFullDeviceId(DId);
+
+  try {
+    log(`[TCP] 📝 Settings command received for device ${deviceId}:`, params);
+
+    // 查找或创建设备参数记录
+    let settings = await DeviceSettings.findOne({ where: { deviceId } });
+
+    if (!settings) {
+      // 首次设置，创建新记录
+      settings = await DeviceSettings.create({
+        deviceId,
+        ...params
+      });
+      log(`[TCP] ✅ Created new settings for device ${deviceId}`);
+    } else {
+      // 更新现有参数
+      await settings.update(params);
+      log(`[TCP] ✅ Updated settings for device ${deviceId}`);
+    }
+
+    // 返回成功响应
+    return {
+      Cmd: 'Settings',
+      RT: 'OK',
+      RC: RC || '0'
+    };
+
+  } catch (error) {
+    logError(`[TCP] ❌ Settings command error for device ${deviceId}:`, error);
+    return {
+      Cmd: 'Settings',
+      RT: 'ERROR',
+      RC: RC || '0',
+      Msg: error.message
+    };
+  }
+}
+
+// ========================================
+// QuerySets - 参数查询命令
+// ========================================
+async function handleQuerySets(cmd) {
+  const { DId, RC } = cmd;
+  const deviceId = buildFullDeviceId(DId);
+
+  try {
+    log(`[TCP] 🔍 QuerySets command received for device ${deviceId}`);
+
+    // 查找设备参数
+    let settings = await DeviceSettings.findOne({ where: { deviceId } });
+
+    if (!settings) {
+      // 如果没有记录，创建默认参数
+      settings = await DeviceSettings.create({ deviceId });
+      log(`[TCP] ℹ️ Created default settings for device ${deviceId}`);
+    }
+
+    // 返回所有参数（不包括P0密码）
+    return {
+      Cmd: 'QuerySets',
+      A1: String(settings.A1),
+      A2: String(settings.A2),
+      A3: String(settings.A3),
+      B1: String(settings.B1),
+      B2: String(settings.B2),
+      B3: String(settings.B3),
+      C1: String(settings.C1),
+      C2: String(settings.C2),
+      C3: String(settings.C3),
+      C4: String(settings.C4),
+      RC: RC || '0'
+    };
+
+  } catch (error) {
+    logError(`[TCP] ❌ QuerySets command error for device ${deviceId}:`, error);
+    return {
+      Cmd: 'QuerySets',
+      RT: 'ERROR',
+      RC: RC || '0',
+      Msg: error.message
+    };
+  }
 }
 
 // ========================================
