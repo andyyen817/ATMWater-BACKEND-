@@ -137,7 +137,9 @@ exports.getTransactions = async (req, res) => {
             balanceType: tx.balanceType,
             status: statusMap[tx.status] || tx.status.toLowerCase(),
             description: tx.description,
-            createdAt: tx.createdAt
+            createdAt: tx.createdAt,
+            rfid: tx.rfid,                    // 新增：返回RFID卡号（虚拟卡或物理卡）
+            cardType: tx.cardType             // 新增：返回卡片类型（Virtual/Physical）
         }));
 
         console.log('[Wallet Transactions] Found', count, 'records, returning page', page);
