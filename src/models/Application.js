@@ -51,6 +51,7 @@ const Application = sequelize.define('Application', {
     communicationLogs: {
         type: DataTypes.JSON,
         allowNull: true,
+        field: 'communicationLogs',
         comment: '沟通记录数组，格式：[{ adminId, adminName, content, createdAt }]'
     }
 }, {
