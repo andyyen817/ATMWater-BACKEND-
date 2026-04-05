@@ -41,7 +41,7 @@ exports.reviewApplication = async (req, res) => {
 
         // 更新对应的审批阶段
         const updateData = {
-            status: status === 'Approved' ? 'Approved' : status === 'Rejected' ? 'Rejected' : 'Reviewing',
+            status: status === 'Approved' ? 'Approved' : status === 'Rejected' ? 'Rejected' : 'Communicating',
             [`approvals.${approvalType}Approval`]: {
                 status,
                 adminId: req.user.id,
@@ -88,7 +88,7 @@ exports.submitApplication = async (req, res) => {
         const existing = await Application.findOne({ 
             applicant: req.user.id, 
             type, 
-            status: { $in: ['Pending', 'Reviewing'] } 
+            status: { $in: ['Pending', 'Communicating'] } 
         });
 
         if (existing) {

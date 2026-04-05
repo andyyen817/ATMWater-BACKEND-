@@ -20,7 +20,7 @@ const Application = sequelize.define('Application', {
         allowNull: false
     },
     status: {
-        type: DataTypes.ENUM('Pending', 'Reviewing', 'Approved', 'Rejected'),
+        type: DataTypes.ENUM('Pending', 'Communicating', 'Approved', 'Rejected'),
         defaultValue: 'Pending'
     },
     // 申请资料 (JSON)

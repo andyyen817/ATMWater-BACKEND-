@@ -13,7 +13,7 @@ const applicationSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['Pending', 'Reviewing', 'Approved', 'Rejected'],
+        enum: ['Pending', 'Communicating', 'Approved', 'Rejected'],
         default: 'Pending'
     },
     // 申请资料

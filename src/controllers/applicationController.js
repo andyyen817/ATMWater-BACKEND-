@@ -59,7 +59,7 @@ exports.reviewApplication = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid application type' });
         }
 
-        const newStatus = status === 'Approved' ? 'Approved' : status === 'Rejected' ? 'Rejected' : 'Reviewing';
+        const newStatus = status === 'Approved' ? 'Approved' : status === 'Rejected' ? 'Rejected' : 'Communicating';
         const approvals = application.approvals || {};
         approvals[`${approvalType}Approval`] = { status, adminId: req.user.id, comment, updatedAt: new Date() };
 
@@ -110,7 +110,7 @@ exports.submitApplication = async (req, res) => {
         }
 
         const existing = await Application.findOne({
-            where: { applicantId: req.user.id, type: appType, status: { [Op.in]: ['Pending', 'Reviewing'] } }
+            where: { applicantId: req.user.id, type: appType, status: { [Op.in]: ['Pending', 'Communicating'] } }
         });
 
         if (existing) {
@@ -161,7 +161,7 @@ exports.getMyStatus = async (req, res) => {
  */
 exports.getPendingCount = async (req, res) => {
     try {
-        const where = { status: { [Op.in]: ['Pending', 'Reviewing'] } };
+        const where = { status: { [Op.in]: ['Pending', 'Communicating'] } };
 
         if (req.user.role === 'Super-Admin') {
             // 不限制类型
@@ -221,9 +221,9 @@ exports.addCommunicationLog = async (req, res) => {
             createdAt: new Date().toISOString()
         });
 
-        // 4. 更新申请状态为 Reviewing（如果当前是 Pending）
+        // 4. 更新申请状态为 Communicating（如果当前是 Pending）
         if (application.status === 'Pending') {
-            application.status = 'Reviewing';
+            application.status = 'Communicating';
         }
 
         application.communicationLogs = logs;
