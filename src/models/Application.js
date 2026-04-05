@@ -46,6 +46,12 @@ const Application = sequelize.define('Application', {
     rejectionReason: {
         type: DataTypes.TEXT,
         allowNull: true
+    },
+    // 沟通记录数组
+    communicationLogs: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        comment: '沟通记录数组，格式：[{ adminId, adminName, content, createdAt }]'
     }
 }, {
     tableName: 'applications',

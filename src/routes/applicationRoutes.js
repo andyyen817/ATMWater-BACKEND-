@@ -5,7 +5,8 @@ const {
     reviewApplication,
     submitApplication,
     getMyStatus,
-    getPendingCount
+    getPendingCount,
+    addCommunicationLog
 } = require('../controllers/applicationController');
 const { protect, authorize, checkPermission } = require('../middleware/authMiddleware');
 
@@ -17,5 +18,6 @@ router.get('/my-status', protect, getMyStatus);
 router.get('/admin/list', protect, authorize('Super-Admin', 'GM', 'Business'), getApplications);
 router.get('/admin/pending-count', protect, authorize('Super-Admin', 'GM', 'Business'), getPendingCount);
 router.put('/admin/:id/review', protect, authorize('Super-Admin', 'GM', 'Business'), reviewApplication);
+router.post('/admin/:id/communication', protect, authorize('Super-Admin', 'GM', 'Business'), addCommunicationLog);
 
 module.exports = router;

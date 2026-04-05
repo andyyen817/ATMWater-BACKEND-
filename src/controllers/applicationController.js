@@ -185,3 +185,57 @@ exports.getPendingCount = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server Error' });
     }
 };
+
+/**
+ * @desc    添加沟通记录
+ * @route   POST /api/applications/admin/:id/communication
+ */
+exports.addCommunicationLog = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { content } = req.body;
+        const adminId = req.user.id;
+        const adminName = req.user.username || req.user.phoneNumber || req.user.name;
+
+        if (!content || !content.trim()) {
+            return res.status(400).json({ success: false, message: 'Content is required' });
+        }
+
+        // 1. 查找申请
+        const application = await Application.findByPk(id);
+        if (!application) {
+            return res.status(404).json({ success: false, message: 'Application not found' });
+        }
+
+        // 2. 检查申请状态（已审批的不能再添加沟通记录）
+        if (application.status === 'Approved' || application.status === 'Rejected') {
+            return res.status(400).json({ success: false, message: 'Cannot add log to finalized application' });
+        }
+
+        // 3. 添加沟通记录
+        const logs = application.communicationLogs || [];
+        logs.push({
+            adminId,
+            adminName,
+            content: content.trim(),
+            createdAt: new Date().toISOString()
+        });
+
+        // 4. 更新申请状态为 Reviewing（如果当前是 Pending）
+        if (application.status === 'Pending') {
+            application.status = 'Reviewing';
+        }
+
+        application.communicationLogs = logs;
+        await application.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Communication log added successfully',
+            data: application
+        });
+    } catch (error) {
+        console.error('Add Communication Log Error:', error);
+        res.status(500).json({ success: false, message: 'Server Error' });
+    }
+};
