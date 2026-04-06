@@ -1156,7 +1156,7 @@ exports.addPhysicalCard = async (req, res) => {
             rfid,
             cardNumber: cardNumber || null,
             status: 'Active',
-            issuedBy: req.user.id,
+            issuedBy: null,  // 总部录入的卡默认未分配
             initialValue,
             balance: initialValue
         });
@@ -1186,7 +1186,7 @@ exports.batchAddPhysicalCards = async (req, res) => {
                     rfid,
                     cardNumber,
                     status: 'Active',
-                    issuedBy: req.user.id,
+                    issuedBy: null,  // 总部批量录入的卡默认未分配
                     initialValue: 0,
                     balance: 0
                 });
