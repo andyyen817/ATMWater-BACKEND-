@@ -12,7 +12,8 @@ const {
     getCardTransactions,
     uploadUserLog,
     uploadAvatar,
-    changePassword
+    changePassword,
+    unbindPhysicalCard
 } = require('../controllers/userController');
 const { protect } = require('../middleware/authMiddleware');
 const avatarUpload = require('../middleware/avatarUploadMiddleware');
@@ -31,5 +32,6 @@ router.delete('/addresses/:id', deleteAddress);
 router.post('/logs/upload', uploadUserLog);
 router.post('/upload-avatar', avatarUpload.single('avatar'), uploadAvatar);
 router.put('/change-password', changePassword);
+router.delete('/cards/:identifier/unbind', unbindPhysicalCard);
 
 module.exports = router;

@@ -332,3 +332,82 @@ exports.changePassword = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server Error' });
     }
 };
+
+/**
+ * @desc    解绑物理卡
+ * @route   DELETE /api/user/cards/:identifier/unbind
+ * @access  Private
+ */
+exports.unbindPhysicalCard = async (req, res) => {
+    try {
+        const { identifier } = req.params;  // 可以是 rfid 或 cardNumber
+        const userId = req.user.id;
+
+        if (!identifier) {
+            return res.status(400).json({
+                success: false,
+                message: 'Card identifier is required'
+            });
+        }
+
+        // 查找物理卡 - 同时支持 rfid 和 cardNumber
+        const card = await PhysicalCard.findOne({
+            where: {
+                [Op.or]: [
+                    { rfid: identifier },
+                    { cardNumber: identifier }
+                ],
+                userId: userId
+            }
+        });
+
+        if (!card) {
+            return res.status(404).json({
+                success: false,
+                message: 'Physical card not found or not bound to this user'
+            });
+        }
+
+        // 保存解绑前的信息（用于日志）
+        const unbindInfo = {
+            rfid: card.rfid,
+            cardNumber: card.cardNumber,
+            previousUserId: card.userId,
+            issuedBy: card.issuedBy,
+            balance: card.balance
+        };
+
+        // 解绑操作：
+        // 1. 清除用户绑定
+        // 2. 设置状态为 Inactive（禁止在售水机使用）
+        // 3. 记录解绑时间
+        card.userId = null;
+        card.status = 'Inactive';
+        card.boundAt = null;  // 清除绑定时间
+        await card.save();
+
+        // 记录操作日志
+        logAction(
+            userId,
+            'UNBIND_PHYSICAL_CARD',
+            `Unbound physical card: ${card.cardNumber || card.rfid} (RFID: ${card.rfid}, issued by: ${card.issuedBy})`
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'Physical card unbound successfully',
+            data: {
+                rfid: card.rfid,
+                cardNumber: card.cardNumber,
+                status: card.status
+            }
+        });
+    } catch (error) {
+        console.error('[UnbindPhysicalCard] Error:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to unbind physical card',
+            error: error.message
+        });
+    }
+};
