@@ -815,6 +815,27 @@ app.post('/api/fix-physical-cards-temp', async (req, res) => {
 });
 
 // ========================================
+// 临时调试端点：检查物理卡数据
+// ========================================
+app.get('/api/debug-physical-cards', async (req, res) => {
+    try {
+        const [cards] = await sequelize.query(
+            'SELECT rfid, cardNumber, issuedBy, userId, status, createdAt FROM physical_cards ORDER BY createdAt DESC LIMIT 10'
+        );
+        const [count] = await sequelize.query(
+            'SELECT COUNT(*) as total, SUM(CASE WHEN issuedBy IS NULL THEN 1 ELSE 0 END) as unassigned, SUM(CASE WHEN issuedBy IS NOT NULL THEN 1 ELSE 0 END) as assigned FROM physical_cards'
+        );
+        res.json({
+            success: true,
+            sample: cards,
+            stats: count[0]
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ========================================
 // 404 Handler - 返回JSON而不是HTML
 // ========================================
 app.use((req, res, next) => {
