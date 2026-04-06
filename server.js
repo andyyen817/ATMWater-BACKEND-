@@ -747,8 +747,21 @@ app.use('/api/referral', require('./src/routes/referralRoutes'));
 // ========================================
 // Temporary Fix Endpoint (Remove after use)
 // ========================================
-app.post('/api/admin/fix-physical-cards', async (req, res) => {
+app.post('/api/fix-physical-cards-temp', async (req, res) => {
     try {
+        // 安全检查：只允许执行一次
+        const [checkCards] = await sequelize.query(
+            'SELECT COUNT(*) as count FROM physical_cards WHERE issuedBy IS NOT NULL'
+        );
+
+        if (checkCards[0].count === 0) {
+            return res.json({
+                success: true,
+                message: 'Already fixed - no cards need updating',
+                updated: 0
+            });
+        }
+
         // 更新所有卡片的 issuedBy 为 NULL
         const [results] = await sequelize.query(
             'UPDATE physical_cards SET issuedBy = NULL WHERE issuedBy IS NOT NULL'
