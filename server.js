@@ -822,20 +822,21 @@ app.get('/api/debug-physical-cards', async (req, res) => {
         // 先检查表结构
         const [columns] = await sequelize.query('SHOW COLUMNS FROM physical_cards');
 
+        // 只查询确定存在的字段
         const [cards] = await sequelize.query(
-            'SELECT rfid, issuedBy, userId, status, createdAt FROM physical_cards ORDER BY createdAt DESC LIMIT 10'
+            'SELECT * FROM physical_cards ORDER BY createdAt DESC LIMIT 5'
         );
         const [count] = await sequelize.query(
-            'SELECT COUNT(*) as total, SUM(CASE WHEN issuedBy IS NULL THEN 1 ELSE 0 END) as unassigned, SUM(CASE WHEN issuedBy IS NOT NULL THEN 1 ELSE 0 END) as assigned FROM physical_cards'
+            'SELECT COUNT(*) as total FROM physical_cards'
         );
         res.json({
             success: true,
-            columns: columns.map(c => c.Field),
+            columns: columns.map(c => ({ field: c.Field, type: c.Type, null: c.Null, key: c.Key, default: c.Default })),
             sample: cards,
-            stats: count[0]
+            total: count[0].total
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: error.message, stack: error.stack });
     }
 });
 
