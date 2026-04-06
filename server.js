@@ -826,8 +826,15 @@ app.post('/api/fix-issued-by-field', async (req, res) => {
 
         console.log('[Fix] Field status:', { hasIssuedBy, hasIssuedBySnake });
 
-        // 步骤2：如果存在 issuedBy（camelCase），删除它
+        // 步骤2：如果存在 issuedBy（camelCase），先删除外键约束，再删除字段
         if (hasIssuedBy) {
+            try {
+                await sequelize.query('ALTER TABLE physical_cards DROP FOREIGN KEY fk_physical_cards_issuedBy');
+                console.log('[Fix] Dropped foreign key constraint');
+            } catch (e) {
+                console.log('[Fix] Foreign key constraint may not exist:', e.message);
+            }
+
             await sequelize.query('ALTER TABLE physical_cards DROP COLUMN issuedBy');
             console.log('[Fix] Dropped issuedBy column');
         }
