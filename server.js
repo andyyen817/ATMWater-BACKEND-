@@ -815,6 +815,64 @@ app.post('/api/fix-physical-cards-temp', async (req, res) => {
 });
 
 // ========================================
+// 修复物理卡字段名问题
+// ========================================
+app.post('/api/fix-issued-by-field', async (req, res) => {
+    try {
+        // 步骤1：检查两个字段的状态
+        const [columns] = await sequelize.query('SHOW COLUMNS FROM physical_cards');
+        const hasIssuedBy = columns.some(c => c.Field === 'issuedBy');
+        const hasIssuedBySnake = columns.some(c => c.Field === 'issued_by');
+
+        console.log('[Fix] Field status:', { hasIssuedBy, hasIssuedBySnake });
+
+        // 步骤2：如果存在 issuedBy（camelCase），删除它
+        if (hasIssuedBy) {
+            await sequelize.query('ALTER TABLE physical_cards DROP COLUMN issuedBy');
+            console.log('[Fix] Dropped issuedBy column');
+        }
+
+        // 步骤3：确保 issued_by 存在且为 NULL
+        if (!hasIssuedBySnake) {
+            await sequelize.query(
+                `ALTER TABLE physical_cards
+                 ADD COLUMN issued_by INT NULL
+                 COMMENT '发卡人ID（售水站管理者）'
+                 AFTER status`
+            );
+            await sequelize.query(
+                `ALTER TABLE physical_cards
+                 ADD CONSTRAINT fk_physical_cards_issued_by
+                 FOREIGN KEY (issued_by) REFERENCES users(id)
+                 ON UPDATE CASCADE ON DELETE SET NULL`
+            );
+            console.log('[Fix] Added issued_by column');
+        }
+
+        // 步骤4：更新所有 issued_by 为 NULL
+        const [result] = await sequelize.query(
+            'UPDATE physical_cards SET issued_by = NULL WHERE issued_by IS NOT NULL'
+        );
+
+        // 步骤5：验证结果
+        const [stats] = await sequelize.query(
+            'SELECT COUNT(*) as total, SUM(CASE WHEN issued_by IS NULL THEN 1 ELSE 0 END) as unassigned FROM physical_cards'
+        );
+
+        res.json({
+            success: true,
+            message: 'Fixed issued_by field successfully',
+            droppedIssuedBy: hasIssuedBy,
+            updated: result.affectedRows || 0,
+            stats: stats[0]
+        });
+    } catch (error) {
+        console.error('[Fix] Error:', error);
+        res.status(500).json({ success: false, message: error.message, stack: error.stack });
+    }
+});
+
+// ========================================
 // 临时调试端点：检查物理卡数据
 // ========================================
 app.get('/api/debug-physical-cards', async (req, res) => {
