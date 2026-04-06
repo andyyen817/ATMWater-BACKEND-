@@ -745,6 +745,34 @@ app.use('/api/content', require('./src/routes/contentRoutes'));
 app.use('/api/referral', require('./src/routes/referralRoutes'));
 
 // ========================================
+// Temporary Fix Endpoint (Remove after use)
+// ========================================
+app.post('/api/admin/fix-physical-cards', async (req, res) => {
+    try {
+        // 更新所有卡片的 issuedBy 为 NULL
+        const [results] = await sequelize.query(
+            'UPDATE physical_cards SET issuedBy = NULL WHERE issuedBy IS NOT NULL'
+        );
+
+        // 验证结果
+        const [cards] = await sequelize.query(
+            'SELECT COUNT(*) as total, SUM(CASE WHEN issuedBy IS NULL THEN 1 ELSE 0 END) as unassigned FROM physical_cards'
+        );
+
+        res.json({
+            success: true,
+            message: 'Physical cards fixed successfully',
+            updated: results.affectedRows,
+            total: cards[0].total,
+            unassigned: cards[0].unassigned
+        });
+    } catch (error) {
+        console.error('[Fix Physical Cards] Error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ========================================
 // 404 Handler - 返回JSON而不是HTML
 // ========================================
 app.use((req, res, next) => {
