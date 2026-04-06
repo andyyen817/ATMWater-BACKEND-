@@ -45,6 +45,16 @@ PhysicalCard.belongsTo(User, {
   as: 'user'
 });
 
+// User <-> PhysicalCard (发卡人关系，一对多)
+User.hasMany(PhysicalCard, {
+  foreignKey: 'issuedBy',
+  as: 'issuedCards'
+});
+PhysicalCard.belongsTo(User, {
+  foreignKey: 'issuedBy',
+  as: 'issuer'
+});
+
 // User <-> Transaction (一对多)
 User.hasMany(Transaction, {
   foreignKey: 'userId',

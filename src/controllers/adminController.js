@@ -1124,7 +1124,10 @@ exports.getPhysicalCards = async (req, res) => {
         const PhysicalCard = require('../models/PhysicalCard');
         const { User } = require('../models');
         const cards = await PhysicalCard.findAll({
-            include: [{ model: User, as: 'user', attributes: ['id', 'phone', 'name'] }],
+            include: [
+                { model: User, as: 'user', attributes: ['id', 'phone', 'name'] },
+                { model: User, as: 'issuer', attributes: ['id', 'phone', 'name'] }
+            ],
             order: [['createdAt', 'DESC']]
         });
         res.json({ success: true, data: cards });
