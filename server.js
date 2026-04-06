@@ -749,7 +749,36 @@ app.use('/api/referral', require('./src/routes/referralRoutes'));
 // ========================================
 app.post('/api/fix-physical-cards-temp', async (req, res) => {
     try {
-        // 安全检查：只允许执行一次
+        // 步骤1：检查 issuedBy 字段是否存在
+        const [columns] = await sequelize.query(
+            "SHOW COLUMNS FROM physical_cards LIKE 'issuedBy'"
+        );
+
+        if (columns.length === 0) {
+            // 字段不存在，需要添加
+            await sequelize.query(
+                `ALTER TABLE physical_cards
+                 ADD COLUMN issuedBy INT NULL
+                 COMMENT '发卡人ID（售水站管理者）'
+                 AFTER status`
+            );
+
+            // 添加外键约束
+            await sequelize.query(
+                `ALTER TABLE physical_cards
+                 ADD CONSTRAINT fk_physical_cards_issuedBy
+                 FOREIGN KEY (issuedBy) REFERENCES users(id)
+                 ON UPDATE CASCADE ON DELETE SET NULL`
+            );
+
+            return res.json({
+                success: true,
+                message: 'Added issuedBy column to physical_cards table',
+                action: 'column_added'
+            });
+        }
+
+        // 步骤2：检查是否需要更新
         const [checkCards] = await sequelize.query(
             'SELECT COUNT(*) as count FROM physical_cards WHERE issuedBy IS NOT NULL'
         );
@@ -757,17 +786,17 @@ app.post('/api/fix-physical-cards-temp', async (req, res) => {
         if (checkCards[0].count === 0) {
             return res.json({
                 success: true,
-                message: 'Already fixed - no cards need updating',
+                message: 'Already fixed - all cards are unassigned',
                 updated: 0
             });
         }
 
-        // 更新所有卡片的 issuedBy 为 NULL
+        // 步骤3：更新所有卡片的 issuedBy 为 NULL
         const [results] = await sequelize.query(
             'UPDATE physical_cards SET issuedBy = NULL WHERE issuedBy IS NOT NULL'
         );
 
-        // 验证结果
+        // 步骤4：验证结果
         const [cards] = await sequelize.query(
             'SELECT COUNT(*) as total, SUM(CASE WHEN issuedBy IS NULL THEN 1 ELSE 0 END) as unassigned FROM physical_cards'
         );
