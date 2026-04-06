@@ -822,13 +822,11 @@ app.get('/api/debug-physical-cards', async (req, res) => {
         // 先检查表结构
         const [columns] = await sequelize.query('SHOW COLUMNS FROM physical_cards');
 
-        // 只查询确定存在的字段
-        const [cards] = await sequelize.query(
-            'SELECT * FROM physical_cards ORDER BY createdAt DESC LIMIT 5'
-        );
-        const [count] = await sequelize.query(
-            'SELECT COUNT(*) as total FROM physical_cards'
-        );
+        // 只查询前5条记录，不指定排序
+        const [cards] = await sequelize.query('SELECT * FROM physical_cards LIMIT 5');
+
+        const [count] = await sequelize.query('SELECT COUNT(*) as total FROM physical_cards');
+
         res.json({
             success: true,
             columns: columns.map(c => ({ field: c.Field, type: c.Type, null: c.Null, key: c.Key, default: c.Default })),
